@@ -16,10 +16,10 @@ export interface AuthSession {
  */
 export async function hashPin(pin: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(`dakota_salt_${pin}`);
+  const data = encoder.encode(pin);
   const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -40,7 +40,14 @@ export async function verifyPin(
   const pinHash = await hashPin(pin);
   const res = await loginWithSheets(role, pinHash);
 
-  if (res.status === 'success' && res.authenticated) {
+  console.log("Dakota login:", {
+    action: "login",
+    username: role,
+    hashLength: pinHash.length,
+    response: res
+  });
+
+  if (res.authenticated === true) {
     setAuthSession(role, res.user?.role || role.toLowerCase());
     return { success: true };
   }
