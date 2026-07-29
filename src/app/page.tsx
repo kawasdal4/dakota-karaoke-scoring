@@ -1,65 +1,110 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { Play, Trophy, Settings, User, CheckCircle2, ListFilter, Users } from 'lucide-react';
+import { getStoredJudge, getActiveEvent, getVocalSubmissions, getPerformanceSubmissions, getStagingSubmissions } from '@/lib/storage';
+import { JudgeRole, KaraokeEvent } from '@/types';
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [judge, setJudge] = useState<JudgeRole>('Kenji');
+  const [activeEvent, setActiveEvent] = useState<KaraokeEvent | null>(null);
+  const [completedCount, setCompletedCount] = useState<number>(0);
+
+  useEffect(() => {
+    const currentJudge = getStoredJudge();
+    setJudge(currentJudge);
+    const evt = getActiveEvent();
+    setActiveEvent(evt);
+
+    // Count how many this judge has submitted in current round
+    let count = 0;
+    if (currentJudge === 'Kenji') {
+      count = getVocalSubmissions(evt.id, evt.currentRound).length;
+    } else if (currentJudge === 'Ukey') {
+      count = getPerformanceSubmissions(evt.id, evt.currentRound).length;
+    } else if (currentJudge === 'Revan') {
+      count = getStagingSubmissions(evt.id, evt.currentRound).length;
+    }
+    setCompletedCount(count);
+  }, []);
+
+  const totalParticipants = activeEvent?.totalParticipants || 31;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="p-5 flex flex-col gap-6 justify-center min-h-[80vh]">
+      {/* Top Minimalist Card */}
+      <div className="glass-panel rounded-3xl p-6 border border-purple-500/30 flex flex-col items-center text-center gap-4 relative overflow-hidden shadow-2xl">
+        <div className="absolute -top-12 -right-12 w-32 h-32 bg-purple-600/20 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-blue-600/20 rounded-full blur-2xl pointer-events-none" />
+
+        {/* Judge Badge */}
+        <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-purple-950/80 border border-purple-500/40 text-purple-300 text-sm font-black tracking-wide shadow-md">
+          <User className="w-4 h-4 text-purple-400" />
+          <span>{judge}</span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Round Title */}
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+            {activeEvent?.name || 'Dakota Karaoke'}
+          </span>
+          <h2 className="text-2xl font-black text-white tracking-tight">
+            {activeEvent?.currentRound || 'Round Penyisihan'}
+          </h2>
         </div>
-      </main>
+
+        {/* Stats Pill Grid */}
+        <div className="grid grid-cols-2 gap-3 w-full mt-2">
+          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+            <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium mb-1">
+              <Users className="w-3.5 h-3.5 text-blue-400" />
+              <span>Total Peserta</span>
+            </div>
+            <span className="text-xl font-black text-white">{totalParticipants} Peserta</span>
+          </div>
+
+          <div className="flex flex-col items-center p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+            <div className="flex items-center gap-1.5 text-slate-400 text-xs font-medium mb-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Sudah Dinilai</span>
+            </div>
+            <span className="text-xl font-black text-emerald-400">{completedCount} Dinilai</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Primary Action Buttons (56px Min Height) */}
+      <div className="flex flex-col gap-3.5 w-full mt-2">
+        {/* Button 1: Mulai Scoring */}
+        <Link
+          href="/scoring"
+          className="w-full min-h-[56px] h-14 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 text-white font-extrabold text-lg flex items-center justify-center gap-3 shadow-xl shadow-purple-600/30 hover:brightness-110 active:scale-[0.98] transition-all"
+        >
+          <Play className="w-6 h-6 fill-current" />
+          <span>▶ Mulai Scoring</span>
+        </Link>
+
+        {/* Button 2: Ranking */}
+        <Link
+          href="/ranking"
+          className="w-full min-h-[56px] h-14 rounded-2xl bg-slate-900/80 border border-purple-500/30 hover:border-purple-400 text-white font-bold text-base flex items-center justify-center gap-3 active:scale-[0.98] transition-all"
+        >
+          <Trophy className="w-5 h-5 text-amber-400" />
+          <span>🏆 Ranking</span>
+        </Link>
+
+        {/* Button 3: Admin */}
+        <Link
+          href="/admin"
+          className="w-full min-h-[56px] h-14 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700 text-slate-300 font-bold text-base flex items-center justify-center gap-3 active:scale-[0.98] transition-all"
+        >
+          <Settings className="w-5 h-5 text-slate-400" />
+          <span>⚙ Admin Settings</span>
+        </Link>
+      </div>
     </div>
   );
 }
