@@ -59,7 +59,34 @@ export default function ScoringPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load judge + event
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const fetchAndInit = async (session: JudgeRole) => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    try {
+      const parts = await fetchParticipants();
+      
+      const evt = getActiveEvent();
+      // Map to Participant interface in memory, don't store in localStorage
+      evt.participants = parts.map((p) => ({
+        id: `p${p.number}`,
+        no: p.number,
+        name: p.name,
+        songTitle: 'TBA',
+        category: 'Umum'
+      }));
+      evt.totalParticipants = parts.length;
+      
+      setEvent(evt);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Gagal memuat peserta');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const session = getAuthSession();
     if (!session) {
@@ -71,16 +98,7 @@ export default function ScoringPage() {
       return;
     }
     setJudge(session);
-
-    const init = async () => {
-      const parts = await fetchParticipants();
-      if (parts.length > 0) {
-        const { syncParticipants } = await import('@/lib/storage');
-        syncParticipants(parts);
-      }
-      setEvent(getActiveEvent());
-    };
-    init();
+    fetchAndInit(session);
   }, [router]);
 
   const participants = event?.participants ?? [];
@@ -229,10 +247,37 @@ export default function ScoringPage() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-5 flex flex-col items-center justify-center min-h-[85vh]">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mb-4"></div>
+        <p className="text-white text-lg font-medium">Memuat data peserta...</p>
+      </div>
+    );
+  }
+
+  if (errorMsg) {
+    return (
+      <div className="p-5 flex flex-col items-center justify-center min-h-[85vh] text-center gap-4">
+        <div className="p-6 rounded-2xl bg-rose-500/10 border border-rose-500/30">
+          <p className="text-rose-400 font-medium mb-4">{errorMsg}</p>
+          <button
+            onClick={() => {
+              if (judge) fetchAndInit(judge);
+            }}
+            className="px-6 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold flex items-center justify-center gap-2 mx-auto transition-colors"
+          >
+            <span>🔄 Muat Ulang Peserta</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!participant) {
     return (
       <div className="p-6 text-center text-slate-400 mt-12 text-sm">
-        Data peserta belum dimuat.
+        Data peserta tidak ditemukan.
       </div>
     );
   }

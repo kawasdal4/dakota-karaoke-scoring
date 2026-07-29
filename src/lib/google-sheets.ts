@@ -196,21 +196,39 @@ export async function submitStagingToSheets(sub: StagingSubmission): Promise<voi
 // ─── Fetch Participants ──────────────────────────────────────
 
 export async function fetchParticipants(): Promise<Array<{ number: number; name: string }>> {
-  const url = getScriptUrl();
-  if (!url) return [];
+  const baseUrl = getScriptUrl();
 
-  try {
-    const res = await fetch(`${url}?action=getParticipants`, {
-      method: 'GET',
-    });
-    if (!res.ok) return [];
-    const json = await res.json();
-    if (json.status === 'success' && Array.isArray(json.participants)) {
-      return json.participants;
-    }
-    return [];
-  } catch (err) {
-    console.warn('[Sheets] Failed to fetch participants:', err);
-    return [];
+  if (!baseUrl) {
+    throw new Error("NEXT_PUBLIC_GOOGLE_SCRIPT_URL belum diatur");
   }
+
+  const url = `${baseUrl}?action=getParticipants`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gagal mengambil peserta: HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+  
+  console.log("Dakota peserta API:", result);
+
+  if (result.status !== "success") {
+    throw new Error(result.message || "Gagal memuat peserta");
+  }
+
+  if (!Array.isArray(result.participants)) {
+    throw new Error("Format data peserta tidak valid");
+  }
+
+  return result.participants
+    .filter((participant: any) => participant && participant.number !== undefined && participant.name)
+    .map((participant: any) => ({
+      number: Number(participant.number),
+      name: String(participant.name).trim()
+    }));
 }

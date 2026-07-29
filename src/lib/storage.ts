@@ -7,6 +7,7 @@ import {
   AdminSettings,
   JudgeRole,
   ParticipantFinalScore,
+  Participant,
 } from '@/types';
 
 export const INITIAL_EVENT: KaraokeEvent = {
@@ -89,23 +90,7 @@ export function setActiveEventId(id: string): void {
   localStorage.setItem(KEYS.ACTIVE_EVENT_ID, id);
 }
 
-export function syncParticipants(participants: Array<{ number: number; name: string }>): void {
-  const events = getStoredEvents();
-  const activeId = getActiveEvent().id;
-  const activeIndex = events.findIndex(e => e.id === activeId);
-  
-  if (activeIndex >= 0) {
-    events[activeIndex].participants = participants.map(p => ({
-      id: `p-${activeId}-${p.number}`,
-      no: p.number,
-      name: p.name,
-      songTitle: '', // Not provided by the sheet
-      category: 'Umum'
-    }));
-    events[activeIndex].totalParticipants = participants.length;
-    saveEvents(events);
-  }
-}
+
 
 // ─── Vocal Submissions (Kenji) ───────────────────────────────
 
@@ -229,13 +214,12 @@ export function unlockStaging(eventId: string, round: string, participantId: str
 
 // ─── Combined Final Score View (Admin) ───────────────────────
 
-export function buildFinalScores(eventId: string, round: string): ParticipantFinalScore[] {
-  const event = getStoredEvents().find((e) => e.id === eventId) || getActiveEvent();
+export function buildFinalScores(eventId: string, round: string, participants: Participant[] = []): ParticipantFinalScore[] {
   const vocals = getVocalSubmissions(eventId, round);
   const perfs  = getPerformanceSubmissions(eventId, round);
   const stages = getStagingSubmissions(eventId, round);
 
-  return event.participants.map((p) => {
+  return participants.map((p) => {
     const v = vocals.find((s) => s.participantId === p.id);
     const pf = perfs.find((s) => s.participantId === p.id);
     const st = stages.find((s) => s.participantId === p.id);

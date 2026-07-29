@@ -39,10 +39,21 @@ export default function AdminPage() {
 
   const load = async () => {
     // 1. Fetch live participants from Google Sheets first
-    const parts = await fetchParticipants();
-    if (parts.length > 0) {
-      const { syncParticipants } = await import('@/lib/storage');
-      syncParticipants(parts);
+    try {
+      const parts = await fetchParticipants();
+      
+      const evt = getActiveEvent();
+      evt.participants = parts.map((p) => ({
+        id: `p${p.number}`,
+        no: p.number,
+        name: p.name,
+        songTitle: 'TBA',
+        category: 'Umum'
+      }));
+      evt.totalParticipants = parts.length;
+      setActiveEvent(evt);
+    } catch (err: any) {
+      showToast(err.message || 'Gagal memuat peserta', 'error');
     }
 
     // 2. Load local state

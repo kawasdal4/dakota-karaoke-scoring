@@ -20,28 +20,42 @@ export default function RankingPage() {
 
   const router = useRouter();
 
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const load = async () => {
     setIsRefreshing(true);
-    
-    // Fetch live participants
-    const parts = await fetchParticipants();
-    if (parts.length > 0) {
-      const { syncParticipants } = await import('@/lib/storage');
-      syncParticipants(parts);
+    setErrorMsg(null);
+    try {
+      // Fetch live participants
+      const parts = await fetchParticipants();
+      
+      const evt = getActiveEvent();
+      const mappedParts = parts.map((p) => ({
+        id: `p${p.number}`,
+        no: p.number,
+        name: p.name,
+        songTitle: 'TBA',
+        category: 'Umum'
+      }));
+      evt.participants = mappedParts;
+      evt.totalParticipants = parts.length;
+      
+      setEvent(evt);
+      const scores = buildFinalScores(evt.id, evt.currentRound, mappedParts);
+      // Sort: complete entries by finalScore desc, then incomplete by name
+      scores.sort((a, b) => {
+        if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
+        if (a.isComplete) return -1;
+        if (b.isComplete) return 1;
+        return a.participantNo - b.participantNo;
+      });
+      setRows(scores);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Gagal memuat peserta');
+      showToast(err.message || 'Gagal memuat peserta', 'error');
+    } finally {
+      setIsRefreshing(false);
     }
-    
-    const evt = getActiveEvent();
-    setEvent(evt);
-    const scores = buildFinalScores(evt.id, evt.currentRound);
-    // Sort: complete entries by finalScore desc, then incomplete by name
-    scores.sort((a, b) => {
-      if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
-      if (a.isComplete) return -1;
-      if (b.isComplete) return 1;
-      return a.participantNo - b.participantNo;
-    });
-    setRows(scores);
-    setIsRefreshing(false);
   };
 
   useEffect(() => {
