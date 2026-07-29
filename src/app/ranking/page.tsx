@@ -9,12 +9,16 @@ import { getActiveEvent, buildFinalScores, getStoredJudge } from '@/lib/storage'
 import { ParticipantFinalScore, KaraokeEvent } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import { fetchParticipants } from '@/lib/google-sheets';
+import { getAuthSession } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
 export default function RankingPage() {
   const { showToast } = useToast();
   const [event, setEvent] = useState<KaraokeEvent | null>(null);
   const [rows, setRows] = useState<ParticipantFinalScore[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const router = useRouter();
 
   const load = async () => {
     setIsRefreshing(true);
@@ -40,7 +44,14 @@ export default function RankingPage() {
     setIsRefreshing(false);
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const session = getAuthSession();
+    if (!session) {
+      router.replace('/login');
+      return;
+    }
+    load();
+  }, [router]);
 
   const handleRefresh = () => {
     load();

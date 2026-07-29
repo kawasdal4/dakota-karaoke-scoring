@@ -27,6 +27,8 @@ import {
   VocalScores, PerformanceScores, StagingScores,
 } from '@/types';
 
+import { getAuthSession } from '@/lib/auth';
+
 // ─── Default score states ───────────────────────────────────
 
 const DEFAULT_VOCAL: VocalScores = { accuracy: 12, character: 8, tempo: 8, technique: 8, expression: 4 };
@@ -59,19 +61,22 @@ export default function ScoringPage() {
 
   // Load judge + event
   useEffect(() => {
+    const session = getAuthSession();
+    if (!session) {
+      router.replace('/login');
+      return;
+    }
+    if (session === 'Admin') {
+      router.replace('/admin');
+      return;
+    }
+    setJudge(session);
+
     const init = async () => {
       const parts = await fetchParticipants();
       if (parts.length > 0) {
         const { syncParticipants } = await import('@/lib/storage');
         syncParticipants(parts);
-      }
-      
-      const j = getStoredJudge();
-      setJudge(j);
-      if (j === 'Admin') {
-        // Admin cannot score — redirect to admin dashboard
-        router.replace('/admin');
-        return;
       }
       setEvent(getActiveEvent());
     };

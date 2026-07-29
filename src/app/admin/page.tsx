@@ -17,6 +17,8 @@ import {
 import { KaraokeEvent, AdminSettings, AuditLogEntry } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import { fetchParticipants } from '@/lib/google-sheets';
+import { getAuthSession } from '@/lib/auth';
+import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
   const { showToast } = useToast();
@@ -32,6 +34,8 @@ export default function AdminPage() {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
   const [showImportBox, setShowImportBox] = useState(false);
+
+  const router = useRouter();
 
   const load = async () => {
     // 1. Fetch live participants from Google Sheets first
@@ -50,7 +54,18 @@ export default function AdminPage() {
     setAuditLogs(getAuditLogs().slice(0, 50));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const session = getAuthSession();
+    if (!session) {
+      router.replace('/login');
+      return;
+    }
+    if (session !== 'Admin') {
+      router.replace('/');
+      return;
+    }
+    load();
+  }, [router]);
 
   const handleSwitchEvent = (id: string) => {
     setActiveEventId(id);
