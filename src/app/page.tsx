@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Play, Trophy, Settings, User, CheckCircle2, ListFilter, Users } from 'lucide-react';
 import { getStoredJudge, getActiveEvent, getVocalSubmissions, getPerformanceSubmissions, getStagingSubmissions } from '@/lib/storage';
+import { fetchParticipants } from '@/lib/google-sheets';
 import { JudgeRole, KaraokeEvent } from '@/types';
 
 export default function DashboardPage() {
@@ -14,21 +15,29 @@ export default function DashboardPage() {
   const [completedCount, setCompletedCount] = useState<number>(0);
 
   useEffect(() => {
-    const currentJudge = getStoredJudge();
-    setJudge(currentJudge);
-    const evt = getActiveEvent();
-    setActiveEvent(evt);
+    const init = async () => {
+      const parts = await fetchParticipants();
+      if (parts.length > 0) {
+        const { syncParticipants } = await import('@/lib/storage');
+        syncParticipants(parts);
+      }
+      
+      const currentJudge = getStoredJudge();
+      setJudge(currentJudge);
+      const evt = getActiveEvent();
+      setActiveEvent(evt);
 
-    // Count how many this judge has submitted in current round
-    let count = 0;
-    if (currentJudge === 'Kenji') {
-      count = getVocalSubmissions(evt.id, evt.currentRound).length;
-    } else if (currentJudge === 'Ukey') {
-      count = getPerformanceSubmissions(evt.id, evt.currentRound).length;
-    } else if (currentJudge === 'Revan') {
-      count = getStagingSubmissions(evt.id, evt.currentRound).length;
-    }
-    setCompletedCount(count);
+      let count = 0;
+      if (currentJudge === 'Kenji') {
+        count = getVocalSubmissions(evt.id, evt.currentRound).length;
+      } else if (currentJudge === 'Ukey') {
+        count = getPerformanceSubmissions(evt.id, evt.currentRound).length;
+      } else if (currentJudge === 'Revan') {
+        count = getStagingSubmissions(evt.id, evt.currentRound).length;
+      }
+      setCompletedCount(count);
+    };
+    init();
   }, []);
 
   const totalParticipants = activeEvent?.totalParticipants || 31;

@@ -16,7 +16,7 @@ import {
   getStagingSubmissions, saveStagingSubmission, unlockStaging,
   saveDraft, getDraft,
 } from '@/lib/storage';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants } from '@/lib/google-sheets';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
@@ -59,15 +59,24 @@ export default function ScoringPage() {
 
   // Load judge + event
   useEffect(() => {
-    const j = getStoredJudge();
-    setJudge(j);
-    if (j === 'Admin') {
-      // Admin cannot score — redirect to admin dashboard
-      router.replace('/admin');
-      return;
-    }
-    setEvent(getActiveEvent());
-  }, []);
+    const init = async () => {
+      const parts = await fetchParticipants();
+      if (parts.length > 0) {
+        const { syncParticipants } = await import('@/lib/storage');
+        syncParticipants(parts);
+      }
+      
+      const j = getStoredJudge();
+      setJudge(j);
+      if (j === 'Admin') {
+        // Admin cannot score — redirect to admin dashboard
+        router.replace('/admin');
+        return;
+      }
+      setEvent(getActiveEvent());
+    };
+    init();
+  }, [router]);
 
   const participants = event?.participants ?? [];
   const participant: Participant | undefined = participants[currentIndex];

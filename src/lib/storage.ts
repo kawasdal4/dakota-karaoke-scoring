@@ -8,7 +8,18 @@ import {
   JudgeRole,
   ParticipantFinalScore,
 } from '@/types';
-import { INITIAL_EVENT } from './mock-data';
+
+export const INITIAL_EVENT: KaraokeEvent = {
+  id: 'evt-dakota-2026',
+  name: 'Dakota Karaoke Cup 2026',
+  date: new Date().toISOString().split('T')[0],
+  totalParticipants: 0,
+  judges: ['Kenji', 'Ukey', 'Revan', 'Admin'],
+  rounds: ['Round Penyisihan', 'Semifinal', 'Grand Final'],
+  currentRound: 'Round Penyisihan',
+  isLocked: false,
+  participants: [], // Loaded from Google Sheets
+};
 
 const KEYS = {
   ACTIVE_JUDGE:    'dakota_active_judge',
@@ -76,6 +87,24 @@ export function getActiveEvent(): KaraokeEvent {
 export function setActiveEventId(id: string): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(KEYS.ACTIVE_EVENT_ID, id);
+}
+
+export function syncParticipants(participants: Array<{ number: number; name: string }>): void {
+  const events = getStoredEvents();
+  const activeId = getActiveEvent().id;
+  const activeIndex = events.findIndex(e => e.id === activeId);
+  
+  if (activeIndex >= 0) {
+    events[activeIndex].participants = participants.map(p => ({
+      id: `p-${activeId}-${p.number}`,
+      no: p.number,
+      name: p.name,
+      songTitle: '', // Not provided by the sheet
+      category: 'Umum'
+    }));
+    events[activeIndex].totalParticipants = participants.length;
+    saveEvents(events);
+  }
 }
 
 // ─── Vocal Submissions (Kenji) ───────────────────────────────

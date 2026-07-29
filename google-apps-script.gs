@@ -26,6 +26,12 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   
+  if (action === 'getParticipants') {
+    var participants = readParticipantsFromSheet();
+    return ContentService.createTextOutput(JSON.stringify({ status: 'success', participants: participants }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'Dakota Karaoke Scoring API Operational' }))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -158,4 +164,27 @@ function readScoresFromSheet(eventId) {
   }
   
   return allScores;
+}
+
+function readParticipantsFromSheet() {
+  // Use getActiveSpreadsheet() unless SPREADSHEET_ID is defined elsewhere
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); 
+  const sheet = ss.getSheetByName("Penyisihan");
+
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) {
+    return [];
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+
+  const participants = values
+    .filter(row => row[1])
+    .map(row => ({
+      number: row[0],
+      name: row[1]
+    }));
+
+  return participants;
 }

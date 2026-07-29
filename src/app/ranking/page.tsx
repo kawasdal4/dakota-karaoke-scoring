@@ -8,6 +8,7 @@ import {
 import { getActiveEvent, buildFinalScores, getStoredJudge } from '@/lib/storage';
 import { ParticipantFinalScore, KaraokeEvent } from '@/types';
 import { useToast } from '@/components/ui/toast';
+import { fetchParticipants } from '@/lib/google-sheets';
 
 export default function RankingPage() {
   const { showToast } = useToast();
@@ -15,8 +16,16 @@ export default function RankingPage() {
   const [rows, setRows] = useState<ParticipantFinalScore[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const load = () => {
+  const load = async () => {
     setIsRefreshing(true);
+    
+    // Fetch live participants
+    const parts = await fetchParticipants();
+    if (parts.length > 0) {
+      const { syncParticipants } = await import('@/lib/storage');
+      syncParticipants(parts);
+    }
+    
     const evt = getActiveEvent();
     setEvent(evt);
     const scores = buildFinalScores(evt.id, evt.currentRound);

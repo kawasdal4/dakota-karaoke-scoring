@@ -117,3 +117,25 @@ export async function submitStagingToSheets(sub: StagingSubmission): Promise<voi
     console.warn('[Sheets] Staging submit error (local fallback active):', err);
   }
 }
+
+// ─── Fetch Participants ──────────────────────────────────────
+
+export async function fetchParticipants(): Promise<Array<{ number: number; name: string }>> {
+  const url = getScriptUrl();
+  if (!url) return [];
+
+  try {
+    const res = await fetch(`${url}?action=getParticipants`, {
+      method: 'GET',
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (json.status === 'success' && Array.isArray(json.participants)) {
+      return json.participants;
+    }
+    return [];
+  } catch (err) {
+    console.warn('[Sheets] Failed to fetch participants:', err);
+    return [];
+  }
+}

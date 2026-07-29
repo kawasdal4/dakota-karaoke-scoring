@@ -16,7 +16,7 @@ import {
 } from '@/lib/storage';
 import { KaraokeEvent, AdminSettings, AuditLogEntry } from '@/types';
 import { useToast } from '@/components/ui/toast';
-import { INITIAL_PARTICIPANTS } from '@/lib/mock-data';
+import { fetchParticipants } from '@/lib/google-sheets';
 
 export default function AdminPage() {
   const { showToast } = useToast();
@@ -33,7 +33,15 @@ export default function AdminPage() {
   const [importJsonText, setImportJsonText] = useState('');
   const [showImportBox, setShowImportBox] = useState(false);
 
-  const load = () => {
+  const load = async () => {
+    // 1. Fetch live participants from Google Sheets first
+    const parts = await fetchParticipants();
+    if (parts.length > 0) {
+      const { syncParticipants } = await import('@/lib/storage');
+      syncParticipants(parts);
+    }
+
+    // 2. Load local state
     const allEvents = getStoredEvents();
     const active = getActiveEvent();
     setEvents(allEvents);
@@ -62,13 +70,7 @@ export default function AdminPage() {
       rounds: ['Round Penyisihan', 'Semifinal', 'Grand Final'],
       currentRound: 'Round Penyisihan',
       isLocked: false,
-      participants: Array.from({ length: newEventParticipants }, (_, i) => ({
-        id: `p-${Date.now()}-${i + 1}`,
-        no: i + 1,
-        name: `Peserta ${i + 1}`,
-        songTitle: `Judul Lagu ${i + 1}`,
-        category: 'Umum',
-      })),
+      participants: [],
     };
     const updated = [...events, newEvt];
     saveEvents(updated);
