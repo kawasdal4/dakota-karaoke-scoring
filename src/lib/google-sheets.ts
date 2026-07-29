@@ -6,11 +6,94 @@ function getScriptUrl(): string | null {
   return settings.googleScriptUrl || process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL || null;
 }
 
+export interface AuthResponse {
+  status: 'success' | 'error';
+  authenticated?: boolean;
+  user?: {
+    username: string;
+    role: string;
+  };
+  message?: string;
+}
+
+export interface ChangePinResponse {
+  status: 'success' | 'error';
+  message: string;
+}
+
+// ─── Centralized Authentication API ──────────────────────────
+
+export async function loginWithSheets(username: string, pinHash: string): Promise<AuthResponse> {
+  const url = getScriptUrl();
+  if (!url) {
+    return {
+      status: 'error',
+      authenticated: false,
+      message: 'Google Apps Script URL belum diatur di Admin Settings.',
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'login',
+        username,
+        pinHash,
+      }),
+    });
+    if (!res.ok) {
+      return { status: 'error', authenticated: false, message: 'Gagal terhubung ke server.' };
+    }
+    const json = await res.json();
+    return json as AuthResponse;
+  } catch (err) {
+    console.error('[Sheets Auth] Login error:', err);
+    return { status: 'error', authenticated: false, message: 'Terjadi kesalahan koneksi internet.' };
+  }
+}
+
+export async function changePinInSheets(
+  username: string,
+  oldPinHash: string,
+  newPinHash: string
+): Promise<ChangePinResponse> {
+  const url = getScriptUrl();
+  if (!url) {
+    return {
+      status: 'error',
+      message: 'Google Apps Script URL belum diatur di Admin Settings.',
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'changePin',
+        username,
+        oldPinHash,
+        newPinHash,
+      }),
+    });
+    if (!res.ok) {
+      return { status: 'error', message: 'Gagal terhubung ke server.' };
+    }
+    const json = await res.json();
+    return json as ChangePinResponse;
+  } catch (err) {
+    console.error('[Sheets Auth] Change PIN error:', err);
+    return { status: 'error', message: 'Terjadi kesalahan koneksi internet.' };
+  }
+}
+
 // ─── Kenji: Write Vocal cells ONLY ──────────────────────────
 
 export async function submitVocalToSheets(sub: VocalSubmission): Promise<void> {
   const url = getScriptUrl();
-  if (!url) return; // offline mode – already saved to localStorage
+  if (!url) return;
 
   try {
     await fetch(url, {
@@ -19,21 +102,17 @@ export async function submitVocalToSheets(sub: VocalSubmission): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'saveVocal',
-        // Identifiers
         eventId: sub.eventId,
         round: sub.round,
         participantNo: sub.participantNo,
         participantName: sub.participantName,
         songTitle: sub.songTitle,
-        // Vocal scores ONLY — Kenji writes these cells
         accuracy:   sub.scores.accuracy,
         character:  sub.scores.character,
         tempo:      sub.scores.tempo,
         technique:  sub.scores.technique,
         expression: sub.scores.expression,
-        // Vocal subtotal (formulas can also compute this, but we write for safety)
         vocalSubtotal: sub.subtotal,
-        // Metadata
         timestamp:  sub.timestamp,
         deviceInfo: sub.deviceInfo,
         userAgent:  sub.userAgent,
@@ -63,14 +142,12 @@ export async function submitPerformanceToSheets(sub: PerformanceSubmission): Pro
         participantNo: sub.participantNo,
         participantName: sub.participantName,
         songTitle: sub.songTitle,
-        // Performance scores ONLY — Ukey writes these cells
         perfExpression: sub.scores.expression,
         confidence:     sub.scores.confidence,
         appearance:     sub.scores.appearance,
         gesture:        sub.scores.gesture,
         creativity:     sub.scores.creativity,
         performanceSubtotal: sub.subtotal,
-        // Metadata
         timestamp:  sub.timestamp,
         deviceInfo: sub.deviceInfo,
         userAgent:  sub.userAgent,
@@ -100,13 +177,11 @@ export async function submitStagingToSheets(sub: StagingSubmission): Promise<voi
         participantNo: sub.participantNo,
         participantName: sub.participantName,
         songTitle: sub.songTitle,
-        // Staging scores ONLY — Revan writes these cells
         interaction:        sub.scores.interaction,
         communication:      sub.scores.communication,
         roomAtmosphere:     sub.scores.roomAtmosphere,
         audienceEngagement: sub.scores.audienceEngagement,
         stagingSubtotal:    sub.subtotal,
-        // Metadata
         timestamp:  sub.timestamp,
         deviceInfo: sub.deviceInfo,
         userAgent:  sub.userAgent,

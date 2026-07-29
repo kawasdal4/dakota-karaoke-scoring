@@ -43,16 +43,15 @@ export default function LoginPage() {
     setIsSubmitting(true);
     setErrorMsg(null);
 
-    const isValid = await verifyPin(selectedRole, pin);
+    const verifyRes = await verifyPin(selectedRole, pin);
     setIsSubmitting(false);
 
-    if (!isValid) {
-      setErrorMsg('PIN salah. Silakan coba lagi.');
+    if (!verifyRes.success) {
+      setErrorMsg(verifyRes.message || 'PIN salah. Silakan coba lagi.');
       setPin('');
       return;
     }
 
-    setAuthSession(selectedRole);
     showToast(`Berhasil masuk sebagai ${selectedRole}`, 'success');
     router.replace(selectedRole === 'Admin' ? '/admin' : '/');
   };

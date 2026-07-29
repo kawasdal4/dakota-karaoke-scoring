@@ -1,21 +1,18 @@
 import { JudgeRole } from '@/types';
 import { setStoredJudge } from './storage';
+import { loginWithSheets, changePinInSheets } from './google-sheets';
 
-const KEYS = {
-  PIN_HASHES: 'dakota_pin_hashes',
-  SESSION: 'dakota_auth_session',
-};
+const SESSION_KEY = 'dakota_auth_session';
 
-// Initial default PINs
-const DEFAULT_PINS: Record<JudgeRole, string> = {
-  Kenji: '1234',
-  Ukey: '1234',
-  Revan: '1234',
-  Admin: '123456',
-};
+export interface AuthSession {
+  username: JudgeRole;
+  role: string;
+  loggedIn: boolean;
+}
 
 /**
  * Generates SHA-256 hash using Web Crypto API.
+ * PIN is never stored or sent in plaintext.
  */
 export async function hashPin(pin: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -26,43 +23,36 @@ export async function hashPin(pin: string): Promise<string> {
 }
 
 /**
- * Initializes default PIN hashes in localStorage if not already set.
+ * Verifies if the entered PIN matches the hash stored in the central Google Spreadsheet.
  */
-export async function ensurePinHashesInitialized(): Promise<Record<string, string>> {
-  if (typeof window === 'undefined') return {};
-  
-  const existing = localStorage.getItem(KEYS.PIN_HASHES);
-  if (existing) {
-    try {
-      return JSON.parse(existing);
-    } catch {
-      // re-initialize if corrupted
-    }
+export async function verifyPin(
+  role: JudgeRole,
+  pin: string
+): Promise<{ success: boolean; message?: string }> {
+  if (typeof window === 'undefined') {
+    return { success: false, message: 'Browser API tidak tersedia' };
   }
 
-  const hashes: Record<string, string> = {};
-  for (const role of ['Kenji', 'Ukey', 'Revan', 'Admin'] as JudgeRole[]) {
-    hashes[role] = await hashPin(DEFAULT_PINS[role]);
+  if (!/^\d{4,6}$/.test(pin)) {
+    return { success: false, message: 'PIN harus 4 sampai 6 angka.' };
   }
 
-  localStorage.setItem(KEYS.PIN_HASHES, JSON.stringify(hashes));
-  return hashes;
+  const pinHash = await hashPin(pin);
+  const res = await loginWithSheets(role, pinHash);
+
+  if (res.status === 'success' && res.authenticated) {
+    setAuthSession(role, res.user?.role || role.toLowerCase());
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    message: res.message || 'PIN salah. Silakan coba lagi.',
+  };
 }
 
 /**
- * Verifies if the entered PIN matches the stored hash for the role.
- */
-export async function verifyPin(role: JudgeRole, pin: string): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
-  if (!/^\d{4,6}$/.test(pin)) return false;
-
-  const hashes = await ensurePinHashesInitialized();
-  const inputHash = await hashPin(pin);
-  return hashes[role] === inputHash;
-}
-
-/**
- * Changes a user's PIN after validating old PIN, new PIN specs, and mismatch rules.
+ * Changes a user's PIN centrally in Google Spreadsheet after validating old PIN & new PIN inputs.
  */
 export async function changePin(
   role: JudgeRole,
@@ -70,15 +60,15 @@ export async function changePin(
   newPin: string,
   confirmNewPin: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (typeof window === 'undefined') return { success: false, error: 'Browser API tidak tersedia' };
-
-  // Validate old PIN
-  const isOldValid = await verifyPin(role, oldPin);
-  if (!isOldValid) {
-    return { success: false, error: 'PIN lama tidak sesuai.' };
+  if (typeof window === 'undefined') {
+    return { success: false, error: 'Browser API tidak tersedia' };
   }
 
   // Validate new PIN format (4 to 6 digits)
+  if (!/^\d{4,6}$/.test(oldPin)) {
+    return { success: false, error: 'PIN lama harus 4 sampai 6 angka.' };
+  }
+
   if (!/^\d{4,6}$/.test(newPin)) {
     return { success: false, error: 'PIN baru harus 4 sampai 6 angka.' };
   }
@@ -93,32 +83,55 @@ export async function changePin(
     return { success: false, error: 'Konfirmasi PIN baru tidak sama.' };
   }
 
-  // Update hash
-  const hashes = await ensurePinHashesInitialized();
-  hashes[role] = await hashPin(newPin);
-  localStorage.setItem(KEYS.PIN_HASHES, JSON.stringify(hashes));
+  const oldPinHash = await hashPin(oldPin);
+  const newPinHash = await hashPin(newPin);
 
-  return { success: true };
+  const res = await changePinInSheets(role, oldPinHash, newPinHash);
+
+  if (res.status === 'success') {
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    error: res.message || 'Gagal mengubah PIN. Silakan coba lagi.',
+  };
 }
 
 /**
- * Gets currently authenticated role from session.
+ * Gets currently authenticated role from active session.
  */
 export function getAuthSession(): JudgeRole | null {
   if (typeof window === 'undefined') return null;
-  const role = localStorage.getItem(KEYS.SESSION) as JudgeRole | null;
-  if (role && ['Kenji', 'Ukey', 'Revan', 'Admin'].includes(role)) {
-    return role;
+  const raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as AuthSession;
+    if (parsed && parsed.loggedIn && ['Kenji', 'Ukey', 'Revan', 'Admin'].includes(parsed.username)) {
+      return parsed.username;
+    }
+  } catch {
+    // If stored as raw string for backward compatibility
+    if (['Kenji', 'Ukey', 'Revan', 'Admin'].includes(raw)) {
+      return raw as JudgeRole;
+    }
   }
+
   return null;
 }
 
 /**
  * Sets auth session and updates active judge in storage.
  */
-export function setAuthSession(role: JudgeRole): void {
+export function setAuthSession(role: JudgeRole, roleCategory = 'user'): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(KEYS.SESSION, role);
+  const session: AuthSession = {
+    username: role,
+    role: roleCategory,
+    loggedIn: true,
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
   setStoredJudge(role);
 }
 
@@ -127,5 +140,5 @@ export function setAuthSession(role: JudgeRole): void {
  */
 export function logoutSession(): void {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem(KEYS.SESSION);
+  localStorage.removeItem(SESSION_KEY);
 }
