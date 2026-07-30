@@ -477,6 +477,12 @@ export function importBackupJSON(json: string): boolean {
   }
 }
 
+// Helper: true if scores object has at least one non-zero value
+function hasRealScores(scores: Record<string, unknown> | null | undefined): boolean {
+  if (!scores || typeof scores !== 'object') return false;
+  return Object.values(scores).some((v) => Number(v) > 0);
+}
+
 // ─── Remote Submissions Sync ─────────────────────────────────
 
 export interface RemoteSubmissions {
@@ -488,16 +494,27 @@ export interface RemoteSubmissions {
 export function syncSubmissionsToStorage(remoteData: RemoteSubmissions): void {
   if (typeof window === 'undefined') return;
 
-  // One-way sync: remote (Sheets) data always wins for any entry it contains.
-  // Local entries for participants NOT in remoteData are preserved.
+  // One-way sync: remote (Sheets) is authoritative for lock state and actual scores.
+  // BUT: if remote entry has empty/zero scores (placeholder from toggleLock operation),
+  //      we preserve the LOCAL scores while still updating the lock state.
 
   if (Array.isArray(remoteData.vocal) && remoteData.vocal.length > 0) {
     const existing = readJSON<VocalSubmission[]>(KEYS.VOCAL, []);
     const mergedMap = new Map<string, VocalSubmission>();
-    // Start with local entries
     existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
-    // Remote entries overwrite local (Sheets is authoritative)
-    remoteData.vocal.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+
+    remoteData.vocal.forEach((remote) => {
+      const key = `${remote.eventId}_${remote.round}_${remote.participantNo}`;
+      const local = mergedMap.get(key);
+
+      if (local && !hasRealScores(remote.scores as any)) {
+        // Remote has placeholder scores — preserve local scores, update lock state only
+        mergedMap.set(key, { ...local, isLocked: remote.isLocked });
+      } else {
+        // Remote has real scores OR no local entry — use remote as-is
+        mergedMap.set(key, remote);
+      }
+    });
     writeJSON(KEYS.VOCAL, Array.from(mergedMap.values()));
   }
 
@@ -505,7 +522,17 @@ export function syncSubmissionsToStorage(remoteData: RemoteSubmissions): void {
     const existing = readJSON<PerformanceSubmission[]>(KEYS.PERFORMANCE, []);
     const mergedMap = new Map<string, PerformanceSubmission>();
     existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
-    remoteData.performance.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+
+    remoteData.performance.forEach((remote) => {
+      const key = `${remote.eventId}_${remote.round}_${remote.participantNo}`;
+      const local = mergedMap.get(key);
+
+      if (local && !hasRealScores(remote.scores as any)) {
+        mergedMap.set(key, { ...local, isLocked: remote.isLocked });
+      } else {
+        mergedMap.set(key, remote);
+      }
+    });
     writeJSON(KEYS.PERFORMANCE, Array.from(mergedMap.values()));
   }
 
@@ -513,7 +540,17 @@ export function syncSubmissionsToStorage(remoteData: RemoteSubmissions): void {
     const existing = readJSON<StagingSubmission[]>(KEYS.STAGING, []);
     const mergedMap = new Map<string, StagingSubmission>();
     existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
-    remoteData.staging.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+
+    remoteData.staging.forEach((remote) => {
+      const key = `${remote.eventId}_${remote.round}_${remote.participantNo}`;
+      const local = mergedMap.get(key);
+
+      if (local && !hasRealScores(remote.scores as any)) {
+        mergedMap.set(key, { ...local, isLocked: remote.isLocked });
+      } else {
+        mergedMap.set(key, remote);
+      }
+    });
     writeJSON(KEYS.STAGING, Array.from(mergedMap.values()));
   }
 }

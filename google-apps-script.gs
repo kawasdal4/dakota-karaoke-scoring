@@ -342,18 +342,21 @@ function getScoringSheet() {
 }
 
 function saveVocal(data) {
-  var sheet = getScoringSheet();
+  // Try to write to main scoring sheet (non-critical — may fail if wrong sheet is active)
+  try {
+    var sheet = getScoringSheet();
+    sheet.getRange("C7").setValue(data.accuracy || 0);
+    sheet.getRange("C8").setValue(data.character || 0);
+    sheet.getRange("C9").setValue(data.tempo || 0);
+    sheet.getRange("C10").setValue(data.technique || 0);
+    sheet.getRange("C11").setValue(data.expression || 0);
+    sheet.getRange("C12").setValue(data.vocalSubtotal || 0);
+    sheet.getRange("A13").setValue(data.notes || "");
+  } catch (sheetErr) {
+    Logger.log("saveVocal: main sheet write failed (non-fatal): " + sheetErr.toString());
+  }
   
-  // Mapping Kenji (Vocal)
-  sheet.getRange("C7").setValue(data.accuracy || 0);
-  sheet.getRange("C8").setValue(data.character || 0);
-  sheet.getRange("C9").setValue(data.tempo || 0);
-  sheet.getRange("C10").setValue(data.technique || 0);
-  sheet.getRange("C11").setValue(data.expression || 0);
-  sheet.getRange("C12").setValue(data.vocalSubtotal || 0);
-  sheet.getRange("A13").setValue(data.notes || "");
-  
-  // Save to SUBMISSIONS sheet
+  // CRITICAL: Always save to SUBMISSIONS sheet regardless of main sheet status
   var vocalScores = {
     accuracy: Number(data.accuracy) || 0,
     character: Number(data.character) || 0,
@@ -367,18 +370,21 @@ function saveVocal(data) {
 }
 
 function savePerformance(data) {
-  var sheet = getScoringSheet();
+  // Try to write to main scoring sheet (non-critical)
+  try {
+    var sheet = getScoringSheet();
+    sheet.getRange("C16").setValue(data.perfExpression || 0);
+    sheet.getRange("C17").setValue(data.confidence || 0);
+    sheet.getRange("C18").setValue(data.appearance || 0);
+    sheet.getRange("C19").setValue(data.gesture || 0);
+    sheet.getRange("C20").setValue(data.creativity || 0);
+    sheet.getRange("C21").setValue(data.performanceSubtotal || 0);
+    sheet.getRange("A22").setValue(data.notes || "");
+  } catch (sheetErr) {
+    Logger.log("savePerformance: main sheet write failed (non-fatal): " + sheetErr.toString());
+  }
   
-  // Mapping Ukey (Performance)
-  sheet.getRange("C16").setValue(data.perfExpression || 0);
-  sheet.getRange("C17").setValue(data.confidence || 0);
-  sheet.getRange("C18").setValue(data.appearance || 0);
-  sheet.getRange("C19").setValue(data.gesture || 0);
-  sheet.getRange("C20").setValue(data.creativity || 0);
-  sheet.getRange("C21").setValue(data.performanceSubtotal || 0);
-  sheet.getRange("A22").setValue(data.notes || "");
-  
-  // Save to SUBMISSIONS sheet
+  // CRITICAL: Always save to SUBMISSIONS sheet
   var perfScores = {
     expression: Number(data.perfExpression) || 0,
     confidence: Number(data.confidence) || 0,
@@ -392,17 +398,20 @@ function savePerformance(data) {
 }
 
 function saveStaging(data) {
-  var sheet = getScoringSheet();
+  // Try to write to main scoring sheet (non-critical)
+  try {
+    var sheet = getScoringSheet();
+    sheet.getRange("C25").setValue(data.interaction || 0);
+    sheet.getRange("C26").setValue(data.communication || 0);
+    sheet.getRange("C27").setValue(data.roomAtmosphere || 0);
+    sheet.getRange("C28").setValue(data.audienceEngagement || 0);
+    sheet.getRange("C29").setValue(data.stagingSubtotal || 0);
+    sheet.getRange("A30").setValue(data.notes || "");
+  } catch (sheetErr) {
+    Logger.log("saveStaging: main sheet write failed (non-fatal): " + sheetErr.toString());
+  }
   
-  // Mapping Revan (Staging)
-  sheet.getRange("C25").setValue(data.interaction || 0);
-  sheet.getRange("C26").setValue(data.communication || 0);
-  sheet.getRange("C27").setValue(data.roomAtmosphere || 0);
-  sheet.getRange("C28").setValue(data.audienceEngagement || 0);
-  sheet.getRange("C29").setValue(data.stagingSubtotal || 0);
-  sheet.getRange("A30").setValue(data.notes || "");
-  
-  // Save to SUBMISSIONS sheet
+  // CRITICAL: Always save to SUBMISSIONS sheet
   var stagingScores = {
     interaction: Number(data.interaction) || 0,
     communication: Number(data.communication) || 0,
