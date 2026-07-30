@@ -128,8 +128,25 @@ export function unlockVocal(eventId: string, round: string, participantId: strin
   );
   if (target) {
     target.isLocked = false;
-    writeJSON(KEYS.VOCAL, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-vocal-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { accuracy: 12, character: 8, tempo: 8, technique: 8, expression: 4 },
+      subtotal: 0,
+      isLocked: false,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Unlock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.VOCAL, all);
 }
 
 export function lockVocal(eventId: string, round: string, participantId: string): void {
@@ -139,8 +156,25 @@ export function lockVocal(eventId: string, round: string, participantId: string)
   );
   if (target) {
     target.isLocked = true;
-    writeJSON(KEYS.VOCAL, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-vocal-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { accuracy: 12, character: 8, tempo: 8, technique: 8, expression: 4 },
+      subtotal: 0,
+      isLocked: true,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Lock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.VOCAL, all);
 }
 
 // ─── Performance Submissions (Ukey) ──────────────────────────
@@ -179,8 +213,25 @@ export function unlockPerformance(eventId: string, round: string, participantId:
   );
   if (target) {
     target.isLocked = false;
-    writeJSON(KEYS.PERFORMANCE, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-perf-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { expression: 8, confidence: 4, appearance: 4, gesture: 4, creativity: 4 },
+      subtotal: 0,
+      isLocked: false,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Unlock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.PERFORMANCE, all);
 }
 
 export function lockPerformance(eventId: string, round: string, participantId: string): void {
@@ -190,8 +241,25 @@ export function lockPerformance(eventId: string, round: string, participantId: s
   );
   if (target) {
     target.isLocked = true;
-    writeJSON(KEYS.PERFORMANCE, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-perf-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { expression: 8, confidence: 4, appearance: 4, gesture: 4, creativity: 4 },
+      subtotal: 0,
+      isLocked: true,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Lock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.PERFORMANCE, all);
 }
 
 // ─── Staging Submissions (Revan) ─────────────────────────────
@@ -230,8 +298,25 @@ export function unlockStaging(eventId: string, round: string, participantId: str
   );
   if (target) {
     target.isLocked = false;
-    writeJSON(KEYS.STAGING, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-stage-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { interaction: 4, communication: 4, roomAtmosphere: 4, audienceEngagement: 4 },
+      subtotal: 0,
+      isLocked: false,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Unlock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.STAGING, all);
 }
 
 export function lockStaging(eventId: string, round: string, participantId: string): void {
@@ -241,8 +326,25 @@ export function lockStaging(eventId: string, round: string, participantId: strin
   );
   if (target) {
     target.isLocked = true;
-    writeJSON(KEYS.STAGING, all);
+  } else {
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    all.push({
+      id: `sub-stage-${pNo}`,
+      eventId,
+      round,
+      participantId,
+      participantNo: pNo,
+      participantName: '',
+      songTitle: '',
+      scores: { interaction: 4, communication: 4, roomAtmosphere: 4, audienceEngagement: 4 },
+      subtotal: 0,
+      isLocked: true,
+      timestamp: new Date().toISOString(),
+      deviceInfo: 'Admin Lock',
+      userAgent: 'Admin',
+    });
   }
+  writeJSON(KEYS.STAGING, all);
 }
 
 // ─── Combined Final Score View (Admin) ───────────────────────

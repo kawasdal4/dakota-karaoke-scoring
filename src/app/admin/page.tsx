@@ -421,6 +421,7 @@ export default function AdminPage() {
           judgeRole="Kenji"
           title="KENJI — VOCAL"
           color="text-purple-300"
+          participants={activeEvent?.participants || []}
           submissions={vocalSubs}
           onToggleLock={(id, locked) => handleToggleLock('Kenji', id, locked)}
           onEdit={(sub) => handleOpenEdit('Kenji', sub)}
@@ -431,6 +432,7 @@ export default function AdminPage() {
           judgeRole="Ukey"
           title="UKEY — PERFORMANCE"
           color="text-blue-300"
+          participants={activeEvent?.participants || []}
           submissions={perfSubs}
           onToggleLock={(id, locked) => handleToggleLock('Ukey', id, locked)}
           onEdit={(sub) => handleOpenEdit('Ukey', sub)}
@@ -441,6 +443,7 @@ export default function AdminPage() {
           judgeRole="Revan"
           title="REVAN — STAGING"
           color="text-cyan-300"
+          participants={activeEvent?.participants || []}
           submissions={stagingSubs}
           onToggleLock={(id, locked) => handleToggleLock('Revan', id, locked)}
           onEdit={(sub) => handleOpenEdit('Revan', sub)}
@@ -519,26 +522,18 @@ export default function AdminPage() {
 
       {/* ── ADMIN DIRECT EDIT MODAL ─────────────────────────── */}
       {editingSub && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md bg-slate-950 border border-purple-500/50 rounded-3xl p-5 shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-950 border border-purple-500/40 rounded-3xl p-5 shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-purple-900/40 pb-3">
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">
-                  EDIT NILAI JURI {editingSub.judge}
-                </span>
-                <h3 className="text-base font-black text-white">
-                  #{editingSub.participantNo} {editingSub.participantName}
-                </h3>
+                <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">EDIT NILAI LANGSUNG (ADMIN)</span>
+                <h3 className="text-base font-black text-white">#{editingSub.participantNo} {editingSub.participantName}</h3>
               </div>
-              <button
-                onClick={() => setEditingSub(null)}
-                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
+              <button onClick={() => setEditingSub(null)} className="p-1.5 rounded-xl bg-slate-900 text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Score Editors */}
             <div className="flex flex-col gap-3">
               {editingSub.judge === 'Kenji' && VOCAL_FIELDS.map(({ key, label, max }) => (
                 <StepperInput
@@ -642,48 +637,70 @@ export default function AdminPage() {
 // ─── Sub-component for each judge's locked submissions ───────
 
 function SubSection({
-  judgeRole, title, color, submissions, onToggleLock, onEdit,
+  judgeRole, title, color, participants, submissions, onToggleLock, onEdit,
 }: {
   judgeRole: 'Kenji' | 'Ukey' | 'Revan';
   title: string;
   color: string;
+  participants: Array<{ id: string; no: number; name: string }>;
   submissions: Array<{ participantId: string; participantNo: number; participantName: string; subtotal: number; isLocked: boolean }>;
   onToggleLock: (participantId: string, currentLocked: boolean) => void;
   onEdit: (sub: any) => void;
 }) {
+  const displayList = participants.length > 0 ? participants.map((p) => {
+    const sub = submissions.find((s) => s.participantId === p.id);
+    return {
+      participantId: p.id,
+      participantNo: p.no,
+      participantName: p.name,
+      subtotal: sub ? sub.subtotal : null,
+      isLocked: sub ? sub.isLocked : false,
+      subObj: sub || null,
+    };
+  }) : submissions.map((s) => ({
+    participantId: s.participantId,
+    participantNo: s.participantNo,
+    participantName: s.participantName,
+    subtotal: s.subtotal,
+    isLocked: s.isLocked,
+    subObj: s,
+  }));
+
   return (
     <div className="flex flex-col gap-2">
       <span className={`text-[11px] font-extrabold uppercase tracking-wider ${color}`}>{title}</span>
-      {submissions.length === 0 ? (
-        <p className="text-[10px] text-slate-500 pl-1">Belum ada nilai tersimpan.</p>
-      ) : submissions.map((s) => (
-        <div key={s.participantId} className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
+      {displayList.length === 0 ? (
+        <p className="text-[10px] text-slate-500 pl-1">Belum ada peserta.</p>
+      ) : displayList.map((item) => (
+        <div key={item.participantId} className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
           <div className="flex flex-col">
-            <span className="text-xs text-white font-semibold">#{s.participantNo} {s.participantName}</span>
-            <span className={`text-xs font-black ${color}`}>{s.subtotal} Poin</span>
+            <span className="text-xs text-white font-semibold">#{item.participantNo} {item.participantName}</span>
+            <span className={`text-xs font-black ${item.subtotal !== null ? color : 'text-slate-500'}`}>
+              {item.subtotal !== null ? `${item.subtotal} Poin` : 'Belum Submit'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Edit Button for Admin */}
-            <button
-              onClick={() => onEdit(s)}
-              className="px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-bold flex items-center gap-1 hover:bg-purple-900/80 transition-all"
-              title="Edit Nilai Langsung"
-            >
-              <Edit3 className="w-3 h-3 text-purple-400" />
-              <span>Edit</span>
-            </button>
+            {item.subObj && (
+              <button
+                onClick={() => onEdit(item.subObj)}
+                className="px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-bold flex items-center gap-1 hover:bg-purple-900/80 transition-all"
+                title="Edit Nilai Langsung"
+              >
+                <Edit3 className="w-3 h-3 text-purple-400" />
+                <span>Edit</span>
+              </button>
+            )}
 
-            {/* Lock / Unlock Toggle Button */}
             <button
-              onClick={() => onToggleLock(s.participantId, s.isLocked)}
+              onClick={() => onToggleLock(item.participantId, item.isLocked)}
               className={`px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1 transition-all ${
-                s.isLocked
+                item.isLocked
                   ? 'bg-rose-950/80 border-rose-500/40 text-rose-300 hover:bg-rose-900/80'
                   : 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80'
               }`}
             >
-              {s.isLocked ? (
+              {item.isLocked ? (
                 <>
                   <Unlock className="w-3 h-3 text-rose-400" />
                   <span>Buka Kunci</span>
