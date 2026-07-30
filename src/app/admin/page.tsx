@@ -4,19 +4,26 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Settings, ArrowLeft, Plus, Lock, Unlock, Download, Upload,
-  ShieldAlert, Database, History, RefreshCw,
+  ShieldAlert, Database, History, RefreshCw, Edit3, X, Save,
 } from 'lucide-react';
 import {
   getStoredEvents, getActiveEvent, saveEvents, setActiveEventId,
   getAdminSettings, saveAdminSettings, getAuditLogs,
-  buildFinalScores,
   getVocalSubmissions, getPerformanceSubmissions, getStagingSubmissions,
   unlockVocal, unlockPerformance, unlockStaging,
+  lockVocal, lockPerformance, lockStaging,
+  saveVocalSubmission, savePerformanceSubmission, saveStagingSubmission,
   exportBackupJSON, importBackupJSON,
 } from '@/lib/storage';
-import { KaraokeEvent, AdminSettings, AuditLogEntry } from '@/types';
+import {
+  VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
+  calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
+  detectDevice
+} from '@/lib/utils';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants } from '@/lib/google-sheets';
+import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
 import { useToast } from '@/components/ui/toast';
-import { fetchParticipants } from '@/lib/google-sheets';
+import StepperInput from '@/components/ui/stepper-input';
 import { getAuthSession } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 
@@ -34,6 +41,18 @@ export default function AdminPage() {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
   const [showImportBox, setShowImportBox] = useState(false);
+
+  // Admin direct score editor modal state
+  const [editingSub, setEditingSub] = useState<{
+    judge: 'Kenji' | 'Ukey' | 'Revan';
+    participantId: string;
+    participantNo: number;
+    participantName: string;
+    songTitle?: string;
+    scores: any;
+    notes: string;
+    isLocked: boolean;
+  } | null>(null);
 
   const router = useRouter();
 
@@ -143,18 +162,92 @@ export default function AdminPage() {
     }
   };
 
-  // Unlock individual submission
-  const handleUnlock = (judge: string, participantId: string) => {
+  // Toggle lock individual submission
+  const handleToggleLock = (judge: 'Kenji' | 'Ukey' | 'Revan', participantId: string, isCurrentlyLocked: boolean) => {
     if (!activeEvent) return;
     const round = activeEvent.currentRound;
-    if (judge === 'Kenji') unlockVocal(activeEvent.id, round, participantId);
-    else if (judge === 'Ukey') unlockPerformance(activeEvent.id, round, participantId);
-    else if (judge === 'Revan') unlockStaging(activeEvent.id, round, participantId);
-    showToast(`Kunci nilai ${judge} dibuka.`, 'info');
+    if (isCurrentlyLocked) {
+      if (judge === 'Kenji') unlockVocal(activeEvent.id, round, participantId);
+      else if (judge === 'Ukey') unlockPerformance(activeEvent.id, round, participantId);
+      else if (judge === 'Revan') unlockStaging(activeEvent.id, round, participantId);
+      showToast(`Kunci nilai ${judge} DIBUKA. Juri/Admin sekarang bisa edit.`, 'info');
+    } else {
+      if (judge === 'Kenji') lockVocal(activeEvent.id, round, participantId);
+      else if (judge === 'Ukey') lockPerformance(activeEvent.id, round, participantId);
+      else if (judge === 'Revan') lockStaging(activeEvent.id, round, participantId);
+      showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI.`, 'info');
+    }
     load();
   };
 
-  // Build submission view for locked-score management
+  // Open Edit modal for a submission
+  const handleOpenEdit = (judge: 'Kenji' | 'Ukey' | 'Revan', sub: any) => {
+    setEditingSub({
+      judge,
+      participantId: sub.participantId,
+      participantNo: sub.participantNo,
+      participantName: sub.participantName,
+      songTitle: sub.songTitle,
+      scores: { ...sub.scores },
+      notes: sub.notes || '',
+      isLocked: sub.isLocked ?? false,
+    });
+  };
+
+  // Save changes from Admin Edit Modal
+  const handleSaveEditSub = () => {
+    if (!editingSub || !activeEvent) return;
+    const now = new Date().toLocaleString('id-ID');
+    const device = detectDevice();
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+
+    const base = {
+      id: `sub-${Date.now()}`,
+      eventId: activeEvent.id,
+      round: activeEvent.currentRound,
+      participantId: editingSub.participantId,
+      participantNo: editingSub.participantNo,
+      participantName: editingSub.participantName,
+      songTitle: editingSub.songTitle || 'TBA',
+      notes: editingSub.notes,
+      isLocked: editingSub.isLocked,
+      timestamp: now,
+      deviceInfo: `${device} (Admin Edit)`,
+      userAgent: ua,
+    };
+
+    if (editingSub.judge === 'Kenji') {
+      const sub: VocalSubmission = {
+        ...base,
+        scores: editingSub.scores,
+        subtotal: calcVocalSubtotal(editingSub.scores),
+      };
+      saveVocalSubmission(sub);
+      submitVocalToSheets(sub);
+    } else if (editingSub.judge === 'Ukey') {
+      const sub: PerformanceSubmission = {
+        ...base,
+        scores: editingSub.scores,
+        subtotal: calcPerformanceSubtotal(editingSub.scores),
+      };
+      savePerformanceSubmission(sub);
+      submitPerformanceToSheets(sub);
+    } else if (editingSub.judge === 'Revan') {
+      const sub: StagingSubmission = {
+        ...base,
+        scores: editingSub.scores,
+        subtotal: calcStagingSubtotal(editingSub.scores),
+      };
+      saveStagingSubmission(sub);
+      submitStagingToSheets(sub);
+    }
+
+    setEditingSub(null);
+    showToast(`Nilai ${editingSub.judge} untuk #${editingSub.participantNo} ${editingSub.participantName} berhasil diperbarui!`, 'success');
+    load();
+  };
+
+  // Submissions lists for locked-score management
   const vocalSubs   = activeEvent ? getVocalSubmissions(activeEvent.id, activeEvent.currentRound) : [];
   const perfSubs    = activeEvent ? getPerformanceSubmissions(activeEvent.id, activeEvent.currentRound) : [];
   const stagingSubs = activeEvent ? getStagingSubmissions(activeEvent.id, activeEvent.currentRound) : [];
@@ -284,21 +377,42 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ── 3. SCORE LOCK MANAGEMENT ───────────────────────────── */}
+      {/* ── 3. SCORE LOCK & EDIT MANAGEMENT ───────────────────────────── */}
       <div className="glass-panel rounded-3xl p-5 border border-rose-500/30 flex flex-col gap-4">
         <h2 className="text-sm font-extrabold text-white uppercase flex items-center gap-2 border-b border-rose-900/40 pb-2">
           <Lock className="w-4 h-4 text-rose-400" />
-          <span>KELOLA KUNCI NILAI</span>
+          <span>KELOLA & EDIT NILAI JURI</span>
         </h2>
 
         {/* Vocal (Kenji) */}
-        <SubSection title="KENJI — VOCAL" color="text-purple-300" submissions={vocalSubs} onUnlock={(id) => handleUnlock('Kenji', id)} />
+        <SubSection
+          judgeRole="Kenji"
+          title="KENJI — VOCAL"
+          color="text-purple-300"
+          submissions={vocalSubs}
+          onToggleLock={(id, locked) => handleToggleLock('Kenji', id, locked)}
+          onEdit={(sub) => handleOpenEdit('Kenji', sub)}
+        />
 
         {/* Performance (Ukey) */}
-        <SubSection title="UKEY — PERFORMANCE" color="text-blue-300" submissions={perfSubs} onUnlock={(id) => handleUnlock('Ukey', id)} />
+        <SubSection
+          judgeRole="Ukey"
+          title="UKEY — PERFORMANCE"
+          color="text-blue-300"
+          submissions={perfSubs}
+          onToggleLock={(id, locked) => handleToggleLock('Ukey', id, locked)}
+          onEdit={(sub) => handleOpenEdit('Ukey', sub)}
+        />
 
         {/* Staging (Revan) */}
-        <SubSection title="REVAN — STAGING" color="text-cyan-300" submissions={stagingSubs} onUnlock={(id) => handleUnlock('Revan', id)} />
+        <SubSection
+          judgeRole="Revan"
+          title="REVAN — STAGING"
+          color="text-cyan-300"
+          submissions={stagingSubs}
+          onToggleLock={(id, locked) => handleToggleLock('Revan', id, locked)}
+          onEdit={(sub) => handleOpenEdit('Revan', sub)}
+        />
       </div>
 
       {/* ── 4. BACKUP & RESTORE ──────────────────────────────────── */}
@@ -370,6 +484,125 @@ export default function AdminPage() {
           ))}
         </div>
       </div>
+
+      {/* ── ADMIN DIRECT EDIT MODAL ─────────────────────────── */}
+      {editingSub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-950 border border-purple-500/50 rounded-3xl p-5 shadow-2xl flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-purple-900/40 pb-3">
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-purple-400 uppercase tracking-wider">
+                  EDIT NILAI JURI {editingSub.judge}
+                </span>
+                <h3 className="text-base font-black text-white">
+                  #{editingSub.participantNo} {editingSub.participantName}
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingSub(null)}
+                className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Score Editors */}
+            <div className="flex flex-col gap-3">
+              {editingSub.judge === 'Kenji' && VOCAL_FIELDS.map(({ key, label, max }) => (
+                <StepperInput
+                  key={key}
+                  label={label}
+                  max={max}
+                  value={editingSub.scores[key] ?? 0}
+                  onChange={(val) => setEditingSub((prev) => prev ? {
+                    ...prev,
+                    scores: { ...prev.scores, [key]: val }
+                  } : null)}
+                />
+              ))}
+
+              {editingSub.judge === 'Ukey' && PERFORMANCE_FIELDS.map(({ key, label, max }) => (
+                <StepperInput
+                  key={key}
+                  label={label}
+                  max={max}
+                  value={editingSub.scores[key] ?? 0}
+                  onChange={(val) => setEditingSub((prev) => prev ? {
+                    ...prev,
+                    scores: { ...prev.scores, [key]: val }
+                  } : null)}
+                />
+              ))}
+
+              {editingSub.judge === 'Revan' && STAGING_FIELDS.map(({ key, label, max }) => (
+                <StepperInput
+                  key={key}
+                  label={label}
+                  max={max}
+                  value={editingSub.scores[key] ?? 0}
+                  onChange={(val) => setEditingSub((prev) => prev ? {
+                    ...prev,
+                    scores: { ...prev.scores, [key]: val }
+                  } : null)}
+                />
+              ))}
+            </div>
+
+            {/* Total score preview */}
+            <div className="p-3 rounded-2xl bg-purple-950/60 border border-purple-500/30 flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-200">SUBTOTAL REVISI:</span>
+              <span className="text-xl font-black text-purple-300">
+                {editingSub.judge === 'Kenji' ? calcVocalSubtotal(editingSub.scores) :
+                 editingSub.judge === 'Ukey'  ? calcPerformanceSubtotal(editingSub.scores) :
+                 calcStagingSubtotal(editingSub.scores)} Poin
+              </span>
+            </div>
+
+            {/* Notes */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300">Catatan Juri/Admin:</label>
+              <textarea
+                rows={2}
+                value={editingSub.notes}
+                onChange={(e) => setEditingSub((prev) => prev ? { ...prev, notes: e.target.value } : null)}
+                className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-purple-500"
+              />
+            </div>
+
+            {/* Lock Status Checkbox */}
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+              <input
+                type="checkbox"
+                id="editLockCheck"
+                checked={editingSub.isLocked}
+                onChange={(e) => setEditingSub((prev) => prev ? { ...prev, isLocked: e.target.checked } : null)}
+                className="w-4 h-4 accent-purple-600 rounded"
+              />
+              <label htmlFor="editLockCheck" className="text-xs font-bold text-slate-200 cursor-pointer">
+                Kunci Nilai Setelah Disimpan (Locked)
+              </label>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={() => setEditingSub(null)}
+                className="flex-1 py-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-800"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSaveEditSub}
+                className="flex-[1.5] py-3 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 text-white text-xs font-extrabold flex items-center justify-center gap-2 shadow-lg shadow-purple-600/40"
+              >
+                <Save className="w-4 h-4" />
+                <span>Simpan Perubahan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -377,12 +610,14 @@ export default function AdminPage() {
 // ─── Sub-component for each judge's locked submissions ───────
 
 function SubSection({
-  title, color, submissions, onUnlock,
+  judgeRole, title, color, submissions, onToggleLock, onEdit,
 }: {
+  judgeRole: 'Kenji' | 'Ukey' | 'Revan';
   title: string;
   color: string;
   submissions: Array<{ participantId: string; participantNo: number; participantName: string; subtotal: number; isLocked: boolean }>;
-  onUnlock: (participantId: string) => void;
+  onToggleLock: (participantId: string, currentLocked: boolean) => void;
+  onEdit: (sub: any) => void;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -390,21 +625,44 @@ function SubSection({
       {submissions.length === 0 ? (
         <p className="text-[10px] text-slate-500 pl-1">Belum ada nilai tersimpan.</p>
       ) : submissions.map((s) => (
-        <div key={s.participantId} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 border border-slate-800">
-          <span className="text-xs text-white font-semibold">#{s.participantNo} {s.participantName}</span>
+        <div key={s.participantId} className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
+          <div className="flex flex-col">
+            <span className="text-xs text-white font-semibold">#{s.participantNo} {s.participantName}</span>
+            <span className={`text-xs font-black ${color}`}>{s.subtotal} Poin</span>
+          </div>
+
           <div className="flex items-center gap-2">
-            <span className={`text-sm font-black ${color}`}>{s.subtotal}</span>
-            {s.isLocked ? (
-              <button
-                onClick={() => onUnlock(s.participantId)}
-                className="text-[10px] font-bold text-rose-300 border border-rose-500/40 px-2 py-0.5 rounded-lg flex items-center gap-1 hover:bg-rose-950/40"
-              >
-                <Unlock className="w-3 h-3" />
-                <span>Buka</span>
-              </button>
-            ) : (
-              <span className="text-[10px] text-emerald-400 font-semibold">Editable</span>
-            )}
+            {/* Edit Button for Admin */}
+            <button
+              onClick={() => onEdit(s)}
+              className="px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-bold flex items-center gap-1 hover:bg-purple-900/80 transition-all"
+              title="Edit Nilai Langsung"
+            >
+              <Edit3 className="w-3 h-3 text-purple-400" />
+              <span>Edit</span>
+            </button>
+
+            {/* Lock / Unlock Toggle Button */}
+            <button
+              onClick={() => onToggleLock(s.participantId, s.isLocked)}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-bold border flex items-center gap-1 transition-all ${
+                s.isLocked
+                  ? 'bg-rose-950/80 border-rose-500/40 text-rose-300 hover:bg-rose-900/80'
+                  : 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80'
+              }`}
+            >
+              {s.isLocked ? (
+                <>
+                  <Unlock className="w-3 h-3 text-rose-400" />
+                  <span>Buka Kunci</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-3 h-3 text-emerald-400" />
+                  <span>Kunci</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       ))}

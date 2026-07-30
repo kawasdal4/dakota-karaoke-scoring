@@ -132,6 +132,17 @@ export function unlockVocal(eventId: string, round: string, participantId: strin
   }
 }
 
+export function lockVocal(eventId: string, round: string, participantId: string): void {
+  let all = readJSON<VocalSubmission[]>(KEYS.VOCAL, []);
+  const target = all.find(
+    (s) => s.eventId === eventId && s.round === round && s.participantId === participantId
+  );
+  if (target) {
+    target.isLocked = true;
+    writeJSON(KEYS.VOCAL, all);
+  }
+}
+
 // ─── Performance Submissions (Ukey) ──────────────────────────
 
 export function getPerformanceSubmissions(eventId: string, round: string): PerformanceSubmission[] {
@@ -172,6 +183,17 @@ export function unlockPerformance(eventId: string, round: string, participantId:
   }
 }
 
+export function lockPerformance(eventId: string, round: string, participantId: string): void {
+  let all = readJSON<PerformanceSubmission[]>(KEYS.PERFORMANCE, []);
+  const target = all.find(
+    (s) => s.eventId === eventId && s.round === round && s.participantId === participantId
+  );
+  if (target) {
+    target.isLocked = true;
+    writeJSON(KEYS.PERFORMANCE, all);
+  }
+}
+
 // ─── Staging Submissions (Revan) ─────────────────────────────
 
 export function getStagingSubmissions(eventId: string, round: string): StagingSubmission[] {
@@ -208,6 +230,17 @@ export function unlockStaging(eventId: string, round: string, participantId: str
   );
   if (target) {
     target.isLocked = false;
+    writeJSON(KEYS.STAGING, all);
+  }
+}
+
+export function lockStaging(eventId: string, round: string, participantId: string): void {
+  let all = readJSON<StagingSubmission[]>(KEYS.STAGING, []);
+  const target = all.find(
+    (s) => s.eventId === eventId && s.round === round && s.participantId === participantId
+  );
+  if (target) {
+    target.isLocked = true;
     writeJSON(KEYS.STAGING, all);
   }
 }

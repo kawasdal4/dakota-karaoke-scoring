@@ -4,16 +4,16 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, ChevronRight, Play, Pause, RotateCcw,
-  Save, Lock, Music, Clock, Sparkles, FileText,
+  Save, Lock, Unlock, Music, Clock, Sparkles, FileText, UserCheck,
 } from 'lucide-react';
 import StepperInput from '@/components/ui/stepper-input';
 import ConfirmationModal from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
 import {
   getStoredJudge, getActiveEvent,
-  getVocalSubmissions, saveVocalSubmission, unlockVocal,
-  getPerformanceSubmissions, savePerformanceSubmission, unlockPerformance,
-  getStagingSubmissions, saveStagingSubmission, unlockStaging,
+  getVocalSubmissions, saveVocalSubmission, unlockVocal, lockVocal,
+  getPerformanceSubmissions, savePerformanceSubmission, unlockPerformance, lockPerformance,
+  getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
   saveDraft, getDraft,
 } from '@/lib/storage';
 import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants } from '@/lib/google-sheets';
@@ -25,6 +25,7 @@ import {
 import {
   JudgeRole, KaraokeEvent, Participant,
   VocalScores, PerformanceScores, StagingScores,
+  VocalSubmission, PerformanceSubmission, StagingSubmission,
 } from '@/types';
 
 import { getAuthSession } from '@/lib/auth';
@@ -42,6 +43,7 @@ export default function ScoringPage() {
   const { showToast } = useToast();
 
   const [judge, setJudge] = useState<JudgeRole>('Kenji');
+  const [isAdminSession, setIsAdminSession] = useState(false);
   const [event, setEvent] = useState<KaraokeEvent | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
 
@@ -69,7 +71,7 @@ export default function ScoringPage() {
       const parts = await fetchParticipants();
       
       const evt = getActiveEvent();
-      // Map to Participant interface in memory, don't store in localStorage
+      // Map to Participant interface in memory
       evt.participants = parts.map((p) => ({
         id: `p${p.number}`,
         no: p.number,
@@ -93,12 +95,16 @@ export default function ScoringPage() {
       router.replace('/login');
       return;
     }
+
     if (session === 'Admin') {
-      router.replace('/admin');
-      return;
+      setIsAdminSession(true);
+      setJudge('Kenji');
+      fetchAndInit('Kenji');
+    } else {
+      setIsAdminSession(false);
+      setJudge(session);
+      fetchAndInit(session);
     }
-    setJudge(session);
-    fetchAndInit(session);
   }, [router]);
 
   const participants = event?.participants ?? [];
@@ -162,6 +168,33 @@ export default function ScoringPage() {
     }
   }, [currentIndex, event, judge]);
 
+  // Live storage / focus listener to pick up Admin unlock changes dynamically
+  useEffect(() => {
+    const syncLockState = () => {
+      if (!participant || !event) return;
+      if (judge === 'Kenji') {
+        const subs = getVocalSubmissions(event.id, event.currentRound);
+        const existing = subs.find((s) => s.participantId === participant.id);
+        if (existing) setIsLocked(existing.isLocked);
+      } else if (judge === 'Ukey') {
+        const subs = getPerformanceSubmissions(event.id, event.currentRound);
+        const existing = subs.find((s) => s.participantId === participant.id);
+        if (existing) setIsLocked(existing.isLocked);
+      } else if (judge === 'Revan') {
+        const subs = getStagingSubmissions(event.id, event.currentRound);
+        const existing = subs.find((s) => s.participantId === participant.id);
+        if (existing) setIsLocked(existing.isLocked);
+      }
+    };
+
+    window.addEventListener('storage', syncLockState);
+    window.addEventListener('focus', syncLockState);
+    return () => {
+      window.removeEventListener('storage', syncLockState);
+      window.removeEventListener('focus', syncLockState);
+    };
+  }, [participant, event, judge]);
+
   // Autosave draft every 5 s
   useEffect(() => {
     if (!participant || isLocked) return;
@@ -186,6 +219,24 @@ export default function ScoringPage() {
   const categoryMeta = judge !== 'Admin' ? JUDGE_CATEGORIES[judge] : null;
   const colorTheme = getScoreColorTheme(subtotal, maxScore);
 
+  // Admin lock toggle directly from scoring page
+  const handleAdminToggleLock = () => {
+    if (!participant || !event) return;
+    if (isLocked) {
+      if (judge === 'Kenji') unlockVocal(event.id, event.currentRound, participant.id);
+      else if (judge === 'Ukey') unlockPerformance(event.id, event.currentRound, participant.id);
+      else if (judge === 'Revan') unlockStaging(event.id, event.currentRound, participant.id);
+      setIsLocked(false);
+      showToast(`Kunci nilai ${judge} DIBUKA oleh Admin.`, 'info');
+    } else {
+      if (judge === 'Kenji') lockVocal(event.id, event.currentRound, participant.id);
+      else if (judge === 'Ukey') lockPerformance(event.id, event.currentRound, participant.id);
+      else if (judge === 'Revan') lockStaging(event.id, event.currentRound, participant.id);
+      setIsLocked(true);
+      showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI oleh Admin.`, 'info');
+    }
+  };
+
   // Save handler
   const executeSave = async () => {
     if (!participant || !event) return;
@@ -206,20 +257,20 @@ export default function ScoringPage() {
       notes,
       isLocked: true,
       timestamp: now,
-      deviceInfo: device,
+      deviceInfo: isAdminSession ? `${device} (Admin)` : device,
       userAgent: ua,
     };
 
     if (judge === 'Kenji') {
-      const sub = { ...base, scores: vocal, subtotal: calcVocalSubtotal(vocal) };
+      const sub: VocalSubmission = { ...base, scores: vocal, subtotal: calcVocalSubtotal(vocal) };
       saveVocalSubmission(sub);
-      submitVocalToSheets(sub); // fire-and-forget, formulas untouched
+      submitVocalToSheets(sub);
     } else if (judge === 'Ukey') {
-      const sub = { ...base, scores: perf, subtotal: calcPerformanceSubtotal(perf) };
+      const sub: PerformanceSubmission = { ...base, scores: perf, subtotal: calcPerformanceSubtotal(perf) };
       savePerformanceSubmission(sub);
       submitPerformanceToSheets(sub);
     } else if (judge === 'Revan') {
-      const sub = { ...base, scores: staging, subtotal: calcStagingSubtotal(staging) };
+      const sub: StagingSubmission = { ...base, scores: staging, subtotal: calcStagingSubtotal(staging) };
       saveStagingSubmission(sub);
       submitStagingToSheets(sub);
     }
@@ -284,6 +335,31 @@ export default function ScoringPage() {
 
   return (
     <div className="p-4 flex flex-col gap-5 pb-32">
+
+      {/* ── ADMIN ROLE SWITCHER (Only visible when logged in as Admin) ── */}
+      {isAdminSession && (
+        <div className="p-3 rounded-2xl bg-purple-950/80 border border-purple-500/40 flex flex-col gap-2 shadow-lg">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300">
+            <UserCheck className="w-4 h-4 text-purple-400" />
+            <span>MODE ADMIN: Pilih Juri untuk Input / Edit Nilai</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {(['Kenji', 'Ukey', 'Revan'] as JudgeRole[]).map((jRole) => (
+              <button
+                key={jRole}
+                onClick={() => setJudge(jRole)}
+                className={`py-2 rounded-xl text-xs font-extrabold transition-all border ${
+                  judge === jRole
+                    ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white border-purple-400 shadow-md'
+                    : 'bg-slate-900/80 text-slate-400 border-slate-800 hover:text-white'
+                }`}
+              >
+                {jRole} ({jRole === 'Kenji' ? 'Vocal' : jRole === 'Ukey' ? 'Perf' : 'Staging'})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── HEADER CARD ─────────────────────────────────────── */}
       <div className="glass-panel rounded-3xl p-5 border border-purple-500/40 shadow-2xl flex flex-col items-center text-center gap-3 relative overflow-hidden">
@@ -351,11 +427,38 @@ export default function ScoringPage() {
           </div>
         )}
 
-        {/* Lock badge */}
-        {isLocked && (
-          <div className="w-full py-1.5 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5">
-            <Lock className="w-4 h-4 text-rose-400" />
-            <span>NILAI TERKUNCI — Admin dapat membuka</span>
+        {/* Lock badge with Admin toggle option */}
+        {isLocked ? (
+          <div className="w-full py-2 px-3 bg-rose-950/80 border border-rose-500/50 rounded-xl text-rose-300 text-xs font-bold flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Lock className="w-4 h-4 text-rose-400" />
+              <span>NILAI TERKUNCI</span>
+            </div>
+            {isAdminSession && (
+              <button
+                onClick={handleAdminToggleLock}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black flex items-center gap-1 hover:bg-emerald-500 transition-all"
+              >
+                <Unlock className="w-3 h-3" />
+                <span>Admin Buka Kunci</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="w-full py-1.5 px-3 bg-emerald-950/80 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs font-bold flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Unlock className="w-4 h-4 text-emerald-400" />
+              <span>TERBUKA — Nilai dapat diedit & disimpan</span>
+            </div>
+            {isAdminSession && (
+              <button
+                onClick={handleAdminToggleLock}
+                className="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black flex items-center gap-1 hover:bg-rose-500 transition-all"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Admin Kunci</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -392,7 +495,7 @@ export default function ScoringPage() {
                 max={max}
                 value={vocal[key]}
                 onChange={(val) => setVocal((prev) => ({ ...prev, [key]: val }))}
-                disabled={isLocked}
+                disabled={isLocked && !isAdminSession}
               />
             ))}
           </div>
@@ -419,7 +522,7 @@ export default function ScoringPage() {
                 max={max}
                 value={perf[key]}
                 onChange={(val) => setPerf((prev) => ({ ...prev, [key]: val }))}
-                disabled={isLocked}
+                disabled={isLocked && !isAdminSession}
               />
             ))}
           </div>
@@ -446,7 +549,7 @@ export default function ScoringPage() {
                 max={max}
                 value={staging[key]}
                 onChange={(val) => setStaging((prev) => ({ ...prev, [key]: val }))}
-                disabled={isLocked}
+                disabled={isLocked && !isAdminSession}
               />
             ))}
           </div>
@@ -463,7 +566,7 @@ export default function ScoringPage() {
           rows={2}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          disabled={isLocked}
+          disabled={isLocked && !isAdminSession}
           placeholder="Catatan penampilan..."
           className="w-full p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 disabled:opacity-50"
         />
@@ -487,7 +590,7 @@ export default function ScoringPage() {
 
         <button
           onClick={() => setIsModalOpen(true)}
-          disabled={isLocked}
+          disabled={isLocked && !isAdminSession}
           className="flex-[1.4] h-14 rounded-2xl bg-gradient-to-r from-purple-600 to-blue-600 text-white text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-purple-600/40 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all"
         >
           <Save className="w-5 h-5" />
@@ -508,7 +611,7 @@ export default function ScoringPage() {
       <ConfirmationModal
         isOpen={isModalOpen}
         title="Simpan & Kunci Nilai?"
-        message={`Simpan skor ${subtotal}/${maxScore} untuk #${participant.no} ${participant.name}? Nilai akan terkunci otomatis.`}
+        message={`Simpan skor ${subtotal}/${maxScore} (${judge}) untuk #${participant.no} ${participant.name}? Nilai akan tersimpan ke database & Google Sheets.`}
         confirmText="Simpan & Lanjut"
         cancelText="Periksa Lagi"
         onConfirm={executeSave}
