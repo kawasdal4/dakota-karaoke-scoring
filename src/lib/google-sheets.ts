@@ -1,5 +1,5 @@
 import { VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
-import { getAdminSettings } from './storage';
+import { getAdminSettings, syncSubmissionsToStorage, RemoteSubmissions } from './storage';
 
 function getScriptUrl(): string | null {
   const settings = getAdminSettings();
@@ -232,3 +232,63 @@ export async function fetchParticipants(): Promise<Array<{ number: number; name:
       name: String(participant.name).trim()
     }));
 }
+
+// ─── Fetch Submissions ───────────────────────────────────────
+
+export async function fetchSubmissionsFromSheets(): Promise<RemoteSubmissions | null> {
+  const baseUrl = getScriptUrl();
+  if (!baseUrl) return null;
+
+  try {
+    const url = `${baseUrl}?action=getSubmissions`;
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    if (data.status === 'success') {
+      const remoteData: RemoteSubmissions = {
+        vocal: data.vocal || [],
+        performance: data.performance || [],
+        staging: data.staging || [],
+      };
+      syncSubmissionsToStorage(remoteData);
+      return remoteData;
+    }
+  } catch (err) {
+    console.warn('[Sheets] Failed to fetch remote submissions:', err);
+  }
+  return null;
+}
+
+// ─── Toggle Lock Status ──────────────────────────────────────
+
+export async function toggleLockToSheets(
+  eventId: string,
+  round: string,
+  role: string,
+  participantNo: number,
+  isLocked: boolean
+): Promise<void> {
+  const url = getScriptUrl();
+  if (!url) return;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggleLock',
+        eventId,
+        round,
+        role: role.toLowerCase(),
+        participantNo,
+        isLocked,
+      }),
+    });
+  } catch (err) {
+    console.warn('[Sheets] toggleLock submit error:', err);
+  }
+}
+
+

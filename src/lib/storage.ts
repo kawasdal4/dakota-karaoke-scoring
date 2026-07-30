@@ -366,3 +366,40 @@ export function importBackupJSON(json: string): boolean {
     return false;
   }
 }
+
+// ─── Remote Submissions Sync ─────────────────────────────────
+
+export interface RemoteSubmissions {
+  vocal?: VocalSubmission[];
+  performance?: PerformanceSubmission[];
+  staging?: StagingSubmission[];
+}
+
+export function syncSubmissionsToStorage(remoteData: RemoteSubmissions): void {
+  if (typeof window === 'undefined') return;
+
+  if (Array.isArray(remoteData.vocal) && remoteData.vocal.length > 0) {
+    const existing = readJSON<VocalSubmission[]>(KEYS.VOCAL, []);
+    const mergedMap = new Map<string, VocalSubmission>();
+    existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    remoteData.vocal.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    writeJSON(KEYS.VOCAL, Array.from(mergedMap.values()));
+  }
+
+  if (Array.isArray(remoteData.performance) && remoteData.performance.length > 0) {
+    const existing = readJSON<PerformanceSubmission[]>(KEYS.PERFORMANCE, []);
+    const mergedMap = new Map<string, PerformanceSubmission>();
+    existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    remoteData.performance.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    writeJSON(KEYS.PERFORMANCE, Array.from(mergedMap.values()));
+  }
+
+  if (Array.isArray(remoteData.staging) && remoteData.staging.length > 0) {
+    const existing = readJSON<StagingSubmission[]>(KEYS.STAGING, []);
+    const mergedMap = new Map<string, StagingSubmission>();
+    existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    remoteData.staging.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    writeJSON(KEYS.STAGING, Array.from(mergedMap.values()));
+  }
+}
+

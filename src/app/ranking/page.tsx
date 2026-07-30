@@ -8,7 +8,7 @@ import {
 import { getActiveEvent, buildFinalScores, getStoredJudge } from '@/lib/storage';
 import { ParticipantFinalScore, KaraokeEvent } from '@/types';
 import { useToast } from '@/components/ui/toast';
-import { fetchParticipants } from '@/lib/google-sheets';
+import { fetchParticipants, fetchSubmissionsFromSheets } from '@/lib/google-sheets';
 import { getAuthSession } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 
@@ -26,6 +26,7 @@ export default function RankingPage() {
     setIsRefreshing(true);
     setErrorMsg(null);
     try {
+      await fetchSubmissionsFromSheets().catch(() => {});
       // Fetch live participants
       const parts = await fetchParticipants();
       
@@ -65,6 +66,12 @@ export default function RankingPage() {
       return;
     }
     load();
+
+    const pollId = setInterval(() => {
+      load();
+    }, 4000);
+
+    return () => clearInterval(pollId);
   }, [router]);
 
   const handleRefresh = () => {

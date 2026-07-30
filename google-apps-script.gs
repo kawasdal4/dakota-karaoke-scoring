@@ -13,6 +13,12 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
   
+  if (action === 'getSubmissions') {
+    var submissions = readSubmissionsFromSheet();
+    return ContentService.createTextOutput(JSON.stringify({ status: 'success', ...submissions }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'API Operational' }))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -36,6 +42,9 @@ function doPost(e) {
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
     } else if (data.action === "saveStaging") {
       result = saveStaging(data);
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "toggleLock") {
+      result = toggleLockInSheet(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
     } else {
       throw new Error("Action tidak dikenali: " + data.action);
@@ -164,12 +173,150 @@ function changePin(data) {
   return { status: "error", message: "Pengguna tidak ditemukan." };
 }
 
+// ─── SUBMISSIONS DATABASE SHEET ────────────────────────────────
+
+function getSubmissionsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("SUBMISSIONS");
+  if (!sheet) {
+    sheet = ss.insertSheet("SUBMISSIONS");
+    var headers = ["eventId", "round", "role", "participantNo", "participantName", "songTitle", "subtotal", "scoresJSON", "notes", "timestamp", "updatedAt", "isLocked"];
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#1e1b4b").setFontColor("#ffffff");
+  }
+  return sheet;
+}
+
+function upsertSubmissionInSheet(data, role, scoresObj, subtotal, isLocked) {
+  var sheet = getSubmissionsSheet();
+  var rows = sheet.getDataRange().getValues();
+  var eventId = data.eventId || "evt-dakota-2026";
+  var round = data.round || "Round Penyisihan";
+  var pNo = Number(data.participantNo);
+  var pName = data.participantName || "";
+  var songTitle = data.songTitle || "";
+  var notes = data.notes || "";
+  var timestamp = data.timestamp || new Date().toISOString();
+  var scoresJSON = JSON.stringify(scoresObj);
+  var updatedAt = new Date().toISOString();
+  var lockedVal = isLocked !== undefined ? isLocked : true;
+
+  for (var i = 1; i < rows.length; i++) {
+    var rEventId = String(rows[i][0]);
+    var rRound = String(rows[i][1]);
+    var rRole = String(rows[i][2]);
+    var rNo = Number(rows[i][3]);
+
+    if (rEventId === eventId && rRound === round && rRole === role && rNo === pNo) {
+      var rowIndex = i + 1;
+      sheet.getRange(rowIndex, 5).setValue(pName);
+      sheet.getRange(rowIndex, 6).setValue(songTitle);
+      sheet.getRange(rowIndex, 7).setValue(subtotal);
+      sheet.getRange(rowIndex, 8).setValue(scoresJSON);
+      sheet.getRange(rowIndex, 9).setValue(notes);
+      sheet.getRange(rowIndex, 10).setValue(timestamp);
+      sheet.getRange(rowIndex, 11).setValue(updatedAt);
+      sheet.getRange(rowIndex, 12).setValue(lockedVal);
+      return;
+    }
+  }
+
+  // Append new row
+  sheet.appendRow([eventId, round, role, pNo, pName, songTitle, subtotal, scoresJSON, notes, timestamp, updatedAt, lockedVal]);
+}
+
+function toggleLockInSheet(data) {
+  var sheet = getSubmissionsSheet();
+  var rows = sheet.getDataRange().getValues();
+  var eventId = data.eventId || "evt-dakota-2026";
+  var round = data.round || "Round Penyisihan";
+  var role = String(data.role || "").toLowerCase();
+  var pNo = Number(data.participantNo);
+  var isLocked = data.isLocked;
+  var updatedAt = new Date().toISOString();
+
+  for (var i = 1; i < rows.length; i++) {
+    var rEventId = String(rows[i][0]);
+    var rRound = String(rows[i][1]);
+    var rRole = String(rows[i][2]).toLowerCase();
+    var rNo = Number(rows[i][3]);
+
+    if (rEventId === eventId && rRound === round && rRole === role && rNo === pNo) {
+      var rowIndex = i + 1;
+      sheet.getRange(rowIndex, 12).setValue(isLocked);
+      sheet.getRange(rowIndex, 11).setValue(updatedAt);
+      return { updated: true, role: role, participantNo: pNo, isLocked: isLocked };
+    }
+  }
+  return { updated: false, message: "Data nilai tidak ditemukan di sheet." };
+}
+
+function readSubmissionsFromSheet() {
+  var sheet = getSubmissionsSheet();
+  if (!sheet) return { vocal: [], performance: [], staging: [] };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { vocal: [], performance: [], staging: [] };
+
+  var rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+  var vocalList = [];
+  var performanceList = [];
+  var stagingList = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var eventId = String(row[0]);
+    var round = String(row[1]);
+    var role = String(row[2]).toLowerCase();
+    var participantNo = Number(row[3]);
+    var participantName = String(row[4]);
+    var songTitle = String(row[5]);
+    var subtotal = Number(row[6]);
+    var scoresJSON = String(row[7]);
+    var notes = String(row[8]);
+    var timestamp = String(row[9]);
+    var isLockedVal = row[11];
+    var isLocked = (isLockedVal === true || String(isLockedVal).toLowerCase() === "true" || isLockedVal === "");
+
+    var scores = {};
+    try {
+      scores = JSON.parse(scoresJSON);
+    } catch(e) {
+      scores = {};
+    }
+
+    var baseSub = {
+      id: "sub-" + role + "-" + participantNo,
+      eventId: eventId,
+      round: round,
+      participantId: "p" + participantNo,
+      participantNo: participantNo,
+      participantName: participantName,
+      songTitle: songTitle,
+      subtotal: subtotal,
+      notes: notes,
+      isLocked: isLocked,
+      timestamp: timestamp,
+      deviceInfo: "Sheets Sync",
+      userAgent: "GoogleAppsScript"
+    };
+
+    if (role === "vocal") {
+      vocalList.push(Object.assign({}, baseSub, { scores: scores }));
+    } else if (role === "performance") {
+      performanceList.push(Object.assign({}, baseSub, { scores: scores }));
+    } else if (role === "staging") {
+      stagingList.push(Object.assign({}, baseSub, { scores: scores }));
+    }
+  }
+
+  return { vocal: vocalList, performance: performanceList, staging: stagingList };
+}
+
 // ─── SCORING ACTIONS (Sesuai Mapping) ─────────────────────────
 
 function getScoringSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  // Gunakan sheet aktif, ATAU gunakan nama sheet spesifik misal "Form Penilaian". 
-  // Jika kode lama Anda menargetkan sheet bernama tertentu, ganti `getActiveSheet()` dengan `getSheetByName("NamaSheet")`.
   return ss.getActiveSheet(); 
 }
 
@@ -185,6 +332,16 @@ function saveVocal(data) {
   sheet.getRange("C12").setValue(data.vocalSubtotal || 0);
   sheet.getRange("A13").setValue(data.notes || "");
   
+  // Save to SUBMISSIONS sheet
+  var vocalScores = {
+    accuracy: Number(data.accuracy) || 0,
+    character: Number(data.character) || 0,
+    tempo: Number(data.tempo) || 0,
+    technique: Number(data.technique) || 0,
+    expression: Number(data.expression) || 0
+  };
+  upsertSubmissionInSheet(data, "vocal", vocalScores, Number(data.vocalSubtotal) || 0, true);
+
   return { updated: true, role: "vocal", message: "Nilai Vocal berhasil disimpan ke sheet." };
 }
 
@@ -200,6 +357,16 @@ function savePerformance(data) {
   sheet.getRange("C21").setValue(data.performanceSubtotal || 0);
   sheet.getRange("A22").setValue(data.notes || "");
   
+  // Save to SUBMISSIONS sheet
+  var perfScores = {
+    expression: Number(data.perfExpression) || 0,
+    confidence: Number(data.confidence) || 0,
+    appearance: Number(data.appearance) || 0,
+    gesture: Number(data.gesture) || 0,
+    creativity: Number(data.creativity) || 0
+  };
+  upsertSubmissionInSheet(data, "performance", perfScores, Number(data.performanceSubtotal) || 0, true);
+
   return { updated: true, role: "performance", message: "Nilai Performance berhasil disimpan ke sheet." };
 }
 
@@ -214,6 +381,15 @@ function saveStaging(data) {
   sheet.getRange("C29").setValue(data.stagingSubtotal || 0);
   sheet.getRange("A30").setValue(data.notes || "");
   
+  // Save to SUBMISSIONS sheet
+  var stagingScores = {
+    interaction: Number(data.interaction) || 0,
+    communication: Number(data.communication) || 0,
+    roomAtmosphere: Number(data.roomAtmosphere) || 0,
+    audienceEngagement: Number(data.audienceEngagement) || 0
+  };
+  upsertSubmissionInSheet(data, "staging", stagingScores, Number(data.stagingSubtotal) || 0, true);
+
   return { updated: true, role: "staging", message: "Nilai Staging berhasil disimpan ke sheet." };
 }
 

@@ -16,7 +16,7 @@ import {
   getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
   saveDraft, getDraft,
 } from '@/lib/storage';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets } from '@/lib/google-sheets';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
@@ -68,6 +68,7 @@ export default function ScoringPage() {
     setIsLoading(true);
     setErrorMsg(null);
     try {
+      await fetchSubmissionsFromSheets().catch(() => {});
       const parts = await fetchParticipants();
       
       const evt = getActiveEvent();
@@ -189,9 +190,16 @@ export default function ScoringPage() {
 
     window.addEventListener('storage', syncLockState);
     window.addEventListener('focus', syncLockState);
+
+    // Auto-poll Google Sheets every 3 seconds for real-time lock/unlock changes from Admin
+    const pollId = setInterval(() => {
+      fetchSubmissionsFromSheets().then(() => syncLockState()).catch(() => {});
+    }, 3000);
+
     return () => {
       window.removeEventListener('storage', syncLockState);
       window.removeEventListener('focus', syncLockState);
+      clearInterval(pollId);
     };
   }, [participant, event, judge]);
 

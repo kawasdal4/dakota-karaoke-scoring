@@ -20,7 +20,7 @@ import {
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
   detectDevice
 } from '@/lib/utils';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets } from '@/lib/google-sheets';
 import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import StepperInput from '@/components/ui/stepper-input';
@@ -41,6 +41,7 @@ export default function AdminPage() {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
   const [showImportBox, setShowImportBox] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Admin direct score editor modal state
   const [editingSub, setEditingSub] = useState<{
@@ -56,7 +57,25 @@ export default function AdminPage() {
 
   const router = useRouter();
 
+  const handleSyncSheets = async () => {
+    setIsSyncing(true);
+    try {
+      const result = await fetchSubmissionsFromSheets();
+      if (result) {
+        showToast('Berhasil sinkronisasi data nilai dari Google Sheets!', 'success');
+        load();
+      } else {
+        showToast('Gagal sinkronisasi data (Cek URL Google Script).', 'error');
+      }
+    } catch (err: any) {
+      showToast('Error sinkronisasi: ' + err.message, 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const load = async () => {
+    await fetchSubmissionsFromSheets().catch(() => {});
     // 1. Fetch live participants from Google Sheets first
     try {
       const parts = await fetchParticipants();
@@ -166,6 +185,9 @@ export default function AdminPage() {
   const handleToggleLock = (judge: 'Kenji' | 'Ukey' | 'Revan', participantId: string, isCurrentlyLocked: boolean) => {
     if (!activeEvent) return;
     const round = activeEvent.currentRound;
+    const pNo = parseInt(participantId.replace('p', '')) || 0;
+    const newLockState = !isCurrentlyLocked;
+
     if (isCurrentlyLocked) {
       if (judge === 'Kenji') unlockVocal(activeEvent.id, round, participantId);
       else if (judge === 'Ukey') unlockPerformance(activeEvent.id, round, participantId);
@@ -177,6 +199,7 @@ export default function AdminPage() {
       else if (judge === 'Revan') lockStaging(activeEvent.id, round, participantId);
       showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI.`, 'info');
     }
+    toggleLockToSheets(activeEvent.id, round, judge, pNo, newLockState);
     load();
   };
 
@@ -264,9 +287,17 @@ export default function AdminPage() {
           <Settings className="w-5 h-5 text-purple-400" />
           <span>ADMIN CONTROL</span>
         </h1>
-        <button onClick={load} className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-400">
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSyncSheets}
+            disabled={isSyncing}
+            className="px-3 py-1.5 rounded-xl bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-bold flex items-center gap-1.5 hover:bg-purple-600/50 transition-all disabled:opacity-50"
+            title="Sinkronisasi data nilai dari Google Sheets"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Syncing...' : 'Sync Sheets'}</span>
+          </button>
+        </div>
       </div>
 
       {/* ── 1. MULTI-EVENT ──────────────────────────────────────── */}
