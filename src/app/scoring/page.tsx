@@ -178,17 +178,58 @@ export default function ScoringPage() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   const handleSyncSheets = async () => {
+    if (!participant || !event) {
+      showToast('Peserta belum dimuat.', 'error');
+      return;
+    }
     setIsSyncing(true);
     try {
       const result = await fetchSubmissionsFromSheets();
       if (result) {
-        showToast('Berhasil sinkronisasi data dari Google Sheets!', 'success');
-        refreshCurrentScores();
+        // Read fresh data directly from result (already stored to localStorage by fetchSubmissionsFromSheets)
+        const settings = getAdminSettings();
+        const isGlobal = settings.isGlobalScoringLocked;
+
+        if (judge === 'Kenji') {
+          const existing = (result.vocal ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (existing) {
+            setVocal(existing.scores);
+            setNotes(existing.notes ?? '');
+            setIsLocked(isGlobal || existing.isLocked);
+          } else {
+            setIsLocked(isGlobal);
+          }
+        } else if (judge === 'Ukey') {
+          const existing = (result.performance ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (existing) {
+            setPerf(existing.scores);
+            setNotes(existing.notes ?? '');
+            setIsLocked(isGlobal || existing.isLocked);
+          } else {
+            setIsLocked(isGlobal);
+          }
+        } else if (judge === 'Revan') {
+          const existing = (result.staging ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (existing) {
+            setStaging(existing.scores);
+            setNotes(existing.notes ?? '');
+            setIsLocked(isGlobal || existing.isLocked);
+          } else {
+            setIsLocked(isGlobal);
+          }
+        }
+        showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
       } else {
-        showToast('Gagal sinkronisasi data.', 'error');
+        showToast('⚠️ Gagal sinkronisasi. Periksa URL Google Script.', 'error');
       }
     } catch (err: any) {
-      showToast('Error sinkronisasi: ' + err.message, 'error');
+      showToast('❌ Error sinkronisasi: ' + err.message, 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -219,17 +260,43 @@ export default function ScoringPage() {
       }
     };
 
-    window.addEventListener('storage', syncLockState);
-    window.addEventListener('focus', syncLockState);
+    const syncFromSheetsAndRefresh = async () => {
+      try {
+        const result = await fetchSubmissionsFromSheets();
+        if (!result || !participant || !event) { syncLockState(); return; }
+        const settings = getAdminSettings();
+        const isGlobal = settings.isGlobalScoringLocked;
+        if (judge === 'Kenji') {
+          const ex = (result.vocal ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (ex) { setVocal(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
+          else { setIsLocked(isGlobal); }
+        } else if (judge === 'Ukey') {
+          const ex = (result.performance ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (ex) { setPerf(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
+          else { setIsLocked(isGlobal); }
+        } else if (judge === 'Revan') {
+          const ex = (result.staging ?? []).find(
+            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
+          );
+          if (ex) { setStaging(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
+          else { setIsLocked(isGlobal); }
+        }
+      } catch { syncLockState(); }
+    };
 
-    // Auto-poll Google Sheets every 3 seconds for real-time lock/unlock changes from Admin
-    const pollId = setInterval(() => {
-      fetchSubmissionsFromSheets().then(() => syncLockState()).catch(() => {});
-    }, 3000);
+    window.addEventListener('storage', syncLockState);
+    window.addEventListener('focus', syncFromSheetsAndRefresh);
+
+    // Auto-poll Google Sheets every 8 seconds for real-time lock/unlock changes from Admin
+    const pollId = setInterval(syncFromSheetsAndRefresh, 8000);
 
     return () => {
       window.removeEventListener('storage', syncLockState);
-      window.removeEventListener('focus', syncLockState);
+      window.removeEventListener('focus', syncFromSheetsAndRefresh);
       clearInterval(pollId);
     };
   }, [participant, event, judge]);

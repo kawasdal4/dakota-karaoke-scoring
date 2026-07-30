@@ -488,10 +488,15 @@ export interface RemoteSubmissions {
 export function syncSubmissionsToStorage(remoteData: RemoteSubmissions): void {
   if (typeof window === 'undefined') return;
 
+  // One-way sync: remote (Sheets) data always wins for any entry it contains.
+  // Local entries for participants NOT in remoteData are preserved.
+
   if (Array.isArray(remoteData.vocal) && remoteData.vocal.length > 0) {
     const existing = readJSON<VocalSubmission[]>(KEYS.VOCAL, []);
     const mergedMap = new Map<string, VocalSubmission>();
+    // Start with local entries
     existing.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
+    // Remote entries overwrite local (Sheets is authoritative)
     remoteData.vocal.forEach((s) => mergedMap.set(`${s.eventId}_${s.round}_${s.participantNo}`, s));
     writeJSON(KEYS.VOCAL, Array.from(mergedMap.values()));
   }
