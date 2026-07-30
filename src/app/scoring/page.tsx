@@ -125,58 +125,79 @@ export default function ScoringPage() {
   const formatTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const refreshCurrentScores = () => {
-    if (!participant || !event) return;
+  const refreshCurrentScores = (overrideParticipant?: typeof participant, overrideEvent?: typeof event) => {
+    const p = overrideParticipant ?? participant;
+    const ev = overrideEvent ?? event;
+    if (!p || !ev) return;
     const settings = getAdminSettings();
     const isGlobal = settings.isGlobalScoringLocked;
 
     if (judge === 'Kenji') {
-      const subs = getVocalSubmissions(event.id, event.currentRound);
-      const existing = subs.find((s) => s.participantId === participant.id);
+      const subs = getVocalSubmissions(ev.id, ev.currentRound);
+      const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
-        setVocal(existing.scores);
+        // Coerce to Number to handle any type mismatch from localStorage/Sheets
+        setVocal({
+          accuracy:  Number(existing.scores?.accuracy)  || 0,
+          character: Number(existing.scores?.character) || 0,
+          tempo:     Number(existing.scores?.tempo)     || 0,
+          technique: Number(existing.scores?.technique) || 0,
+          expression:Number(existing.scores?.expression)|| 0,
+        });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
         return;
       }
-      const draft = getDraft(judge, participant.id) as VocalScores | null;
+      const draft = getDraft(judge, p.id) as VocalScores | null;
       setVocal(draft ?? DEFAULT_VOCAL);
       setNotes('');
       setIsLocked(isGlobal);
 
     } else if (judge === 'Ukey') {
-      const subs = getPerformanceSubmissions(event.id, event.currentRound);
-      const existing = subs.find((s) => s.participantId === participant.id);
+      const subs = getPerformanceSubmissions(ev.id, ev.currentRound);
+      const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
-        setPerf(existing.scores);
+        setPerf({
+          expression: Number(existing.scores?.expression) || 0,
+          confidence: Number(existing.scores?.confidence) || 0,
+          appearance: Number(existing.scores?.appearance) || 0,
+          gesture:    Number(existing.scores?.gesture)    || 0,
+          creativity: Number(existing.scores?.creativity) || 0,
+        });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
         return;
       }
-      const draft = getDraft(judge, participant.id) as PerformanceScores | null;
+      const draft = getDraft(judge, p.id) as PerformanceScores | null;
       setPerf(draft ?? DEFAULT_PERF);
       setNotes('');
       setIsLocked(isGlobal);
 
     } else if (judge === 'Revan') {
-      const subs = getStagingSubmissions(event.id, event.currentRound);
-      const existing = subs.find((s) => s.participantId === participant.id);
+      const subs = getStagingSubmissions(ev.id, ev.currentRound);
+      const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
-        setStaging(existing.scores);
+        setStaging({
+          interaction:        Number(existing.scores?.interaction)        || 0,
+          communication:     Number(existing.scores?.communication)     || 0,
+          roomAtmosphere:    Number(existing.scores?.roomAtmosphere)    || 0,
+          audienceEngagement:Number(existing.scores?.audienceEngagement)|| 0,
+        });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
         return;
       }
-      const draft = getDraft(judge, participant.id) as StagingScores | null;
+      const draft = getDraft(judge, p.id) as StagingScores | null;
       setStaging(draft ?? DEFAULT_STAGING);
       setNotes('');
       setIsLocked(isGlobal);
     }
   };
 
-  // Load existing submission or draft when participant changes
+  // Load existing submission or draft when participant/event/judge changes
   useEffect(() => {
-    refreshCurrentScores();
+    refreshCurrentScores(participant, event);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, event, judge]);
 
   const [isSyncing, setIsSyncing] = useState(false);
@@ -190,37 +211,10 @@ export default function ScoringPage() {
     try {
       const result = await fetchSubmissionsFromSheets();
       if (result) {
-        const settings = getAdminSettings();
-        const isGlobal = settings.isGlobalScoringLocked;
-
-        if (judge === 'Kenji') {
-          const existing = (result.vocal ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (existing) {
-            setVocal({ accuracy: Number(existing.scores.accuracy), character: Number(existing.scores.character), tempo: Number(existing.scores.tempo), technique: Number(existing.scores.technique), expression: Number(existing.scores.expression) });
-            setNotes(existing.notes ?? '');
-            setIsLocked(isGlobal || existing.isLocked);
-          } else { setIsLocked(isGlobal); }
-        } else if (judge === 'Ukey') {
-          const existing = (result.performance ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (existing) {
-            setPerf({ expression: Number(existing.scores.expression), confidence: Number(existing.scores.confidence), appearance: Number(existing.scores.appearance), gesture: Number(existing.scores.gesture), creativity: Number(existing.scores.creativity) });
-            setNotes(existing.notes ?? '');
-            setIsLocked(isGlobal || existing.isLocked);
-          } else { setIsLocked(isGlobal); }
-        } else if (judge === 'Revan') {
-          const existing = (result.staging ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (existing) {
-            setStaging({ interaction: Number(existing.scores.interaction), communication: Number(existing.scores.communication), roomAtmosphere: Number(existing.scores.roomAtmosphere), audienceEngagement: Number(existing.scores.audienceEngagement) });
-            setNotes(existing.notes ?? '');
-            setIsLocked(isGlobal || existing.isLocked);
-          } else { setIsLocked(isGlobal); }
-        }
+        // fetchSubmissionsFromSheets has already stored the data to localStorage.
+        // Now re-read from localStorage using explicit participant & event args
+        // so we avoid any stale closure issue.
+        refreshCurrentScores(participant, event);
         showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
       } else {
         showToast('⚠️ Gagal sinkronisasi. Periksa URL Google Script.', 'error');
@@ -258,7 +252,6 @@ export default function ScoringPage() {
     };
 
     const syncFromSheetsAndRefresh = async () => {
-      // Skip if user just changed a lock — let Sheets process it first
       if (Date.now() - lastLockActionRef.current < LOCK_DEBOUNCE_MS) {
         syncLockState();
         return;
@@ -266,36 +259,8 @@ export default function ScoringPage() {
       try {
         const result = await fetchSubmissionsFromSheets();
         if (!result || !participant || !event) { syncLockState(); return; }
-        const settings = getAdminSettings();
-        const isGlobal = settings.isGlobalScoringLocked;
-        if (judge === 'Kenji') {
-          const ex = (result.vocal ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (ex) {
-            setVocal({ accuracy: Number(ex.scores.accuracy), character: Number(ex.scores.character), tempo: Number(ex.scores.tempo), technique: Number(ex.scores.technique), expression: Number(ex.scores.expression) });
-            setNotes(ex.notes ?? '');
-            setIsLocked(isGlobal || ex.isLocked);
-          } else { setIsLocked(isGlobal); }
-        } else if (judge === 'Ukey') {
-          const ex = (result.performance ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (ex) {
-            setPerf({ expression: Number(ex.scores.expression), confidence: Number(ex.scores.confidence), appearance: Number(ex.scores.appearance), gesture: Number(ex.scores.gesture), creativity: Number(ex.scores.creativity) });
-            setNotes(ex.notes ?? '');
-            setIsLocked(isGlobal || ex.isLocked);
-          } else { setIsLocked(isGlobal); }
-        } else if (judge === 'Revan') {
-          const ex = (result.staging ?? []).find(
-            (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
-          );
-          if (ex) {
-            setStaging({ interaction: Number(ex.scores.interaction), communication: Number(ex.scores.communication), roomAtmosphere: Number(ex.scores.roomAtmosphere), audienceEngagement: Number(ex.scores.audienceEngagement) });
-            setNotes(ex.notes ?? '');
-            setIsLocked(isGlobal || ex.isLocked);
-          } else { setIsLocked(isGlobal); }
-        }
+        // Data stored to localStorage — refresh UI state from localStorage
+        refreshCurrentScores(participant, event);
       } catch { syncLockState(); }
     };
 
