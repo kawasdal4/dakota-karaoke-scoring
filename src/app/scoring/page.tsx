@@ -15,6 +15,7 @@ import {
   getPerformanceSubmissions, savePerformanceSubmission, unlockPerformance, lockPerformance,
   getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
   saveDraft, getDraft,
+  RemoteSubmissions,
 } from '@/lib/storage';
 import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets } from '@/lib/google-sheets';
 import {
@@ -202,6 +203,63 @@ export default function ScoringPage() {
 
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // ─── Core helper: apply a single remote submission to React state ────────
+  const applyRemoteSubmission = (result: RemoteSubmissions, p: typeof participant, isGlobal: boolean) => {
+    if (!p) return false;
+
+    // Dual match: by participantId ('p1') OR by participantNo (1)
+    const findMatch = (list: any[]) =>
+      (list ?? []).find((s: any) => s.participantId === p!.id) ??
+      (list ?? []).find((s: any) => Number(s.participantNo) === Number(p!.no));
+
+    if (judge === 'Kenji') {
+      const m = findMatch(result.vocal ?? []);
+      if (m) {
+        setVocal({
+          accuracy:   Number(m.scores?.accuracy)   || 0,
+          character:  Number(m.scores?.character)  || 0,
+          tempo:      Number(m.scores?.tempo)      || 0,
+          technique:  Number(m.scores?.technique)  || 0,
+          expression: Number(m.scores?.expression) || 0,
+        });
+        setNotes(m.notes ?? '');
+        setIsLocked(isGlobal || Boolean(m.isLocked));
+        return true;
+      }
+      setIsLocked(isGlobal);
+    } else if (judge === 'Ukey') {
+      const m = findMatch(result.performance ?? []);
+      if (m) {
+        setPerf({
+          expression: Number(m.scores?.expression) || 0,
+          confidence: Number(m.scores?.confidence) || 0,
+          appearance: Number(m.scores?.appearance) || 0,
+          gesture:    Number(m.scores?.gesture)    || 0,
+          creativity: Number(m.scores?.creativity) || 0,
+        });
+        setNotes(m.notes ?? '');
+        setIsLocked(isGlobal || Boolean(m.isLocked));
+        return true;
+      }
+      setIsLocked(isGlobal);
+    } else if (judge === 'Revan') {
+      const m = findMatch(result.staging ?? []);
+      if (m) {
+        setStaging({
+          interaction:         Number(m.scores?.interaction)         || 0,
+          communication:      Number(m.scores?.communication)      || 0,
+          roomAtmosphere:     Number(m.scores?.roomAtmosphere)     || 0,
+          audienceEngagement: Number(m.scores?.audienceEngagement) || 0,
+        });
+        setNotes(m.notes ?? '');
+        setIsLocked(isGlobal || Boolean(m.isLocked));
+        return true;
+      }
+      setIsLocked(isGlobal);
+    }
+    return false;
+  };
+
   const handleSyncSheets = async () => {
     if (!participant || !event) {
       showToast('Peserta belum dimuat.', 'error');
@@ -211,16 +269,18 @@ export default function ScoringPage() {
     try {
       const result = await fetchSubmissionsFromSheets();
       if (result) {
-        // fetchSubmissionsFromSheets has already stored the data to localStorage.
-        // Now re-read from localStorage using explicit participant & event args
-        // so we avoid any stale closure issue.
-        refreshCurrentScores(participant, event);
-        showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
+        const settings = getAdminSettings();
+        const found = applyRemoteSubmission(result, participant, settings.isGlobalScoringLocked);
+        if (found) {
+          showToast('\u2705 Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
+        } else {
+          showToast('\u26a0\ufe0f Sync OK tapi belum ada data untuk peserta ini di Sheets.', 'info');
+        }
       } else {
-        showToast('⚠️ Gagal sinkronisasi. Periksa URL Google Script.', 'error');
+        showToast('\u26a0\ufe0f Gagal sinkronisasi. Cek URL Google Script di .env.local.', 'error');
       }
     } catch (err: any) {
-      showToast('❌ Error sinkronisasi: ' + err.message, 'error');
+      showToast('\u274c Error sinkronisasi: ' + err.message, 'error');
     } finally {
       setIsSyncing(false);
     }
@@ -259,8 +319,9 @@ export default function ScoringPage() {
       try {
         const result = await fetchSubmissionsFromSheets();
         if (!result || !participant || !event) { syncLockState(); return; }
-        // Data stored to localStorage — refresh UI state from localStorage
-        refreshCurrentScores(participant, event);
+        const settings = getAdminSettings();
+        // Directly apply from API response — bypass localStorage for state update
+        applyRemoteSubmission(result, participant, settings.isGlobalScoringLocked);
       } catch { syncLockState(); }
     };
 
