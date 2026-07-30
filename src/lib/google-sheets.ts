@@ -287,6 +287,16 @@ export async function toggleLockToSheets(
   const url = getScriptUrl();
   if (!url) return;
 
+  const roleMap: Record<string, string> = {
+    kenji: 'vocal',
+    vocal: 'vocal',
+    ukey: 'performance',
+    performance: 'performance',
+    revan: 'staging',
+    staging: 'staging',
+  };
+  const normalizedRole = roleMap[role.toLowerCase()] || role.toLowerCase();
+
   try {
     await fetch(url, {
       method: 'POST',
@@ -296,7 +306,7 @@ export async function toggleLockToSheets(
         action: 'toggleLock',
         eventId,
         round,
-        role: role.toLowerCase(),
+        role: normalizedRole,
         participantNo,
         isLocked,
       }),

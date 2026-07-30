@@ -58,6 +58,16 @@ function doPost(e) {
   }
 }
 
+// ─── ROLE HELPER ──────────────────────────────────────────────
+
+function normalizeRole(role) {
+  var r = String(role || "").toLowerCase().trim();
+  if (r === "kenji" || r === "vocal") return "vocal";
+  if (r === "ukey" || r === "performance") return "performance";
+  if (r === "revan" || r === "staging") return "staging";
+  return r;
+}
+
 // ─── AUTHENTICATION (TERPUSAT) ────────────────────────────────
 
 function hashPinGAS(pin) {
@@ -195,6 +205,7 @@ function upsertSubmissionInSheet(data, role, scoresObj, subtotal, isLocked) {
   var rows = sheet.getDataRange().getValues();
   var eventId = data.eventId || "evt-dakota-2026";
   var round = data.round || "Round Penyisihan";
+  var normRole = normalizeRole(role);
   var pNo = Number(data.participantNo);
   var pName = data.participantName || "";
   var songTitle = data.songTitle || "";
@@ -207,11 +218,12 @@ function upsertSubmissionInSheet(data, role, scoresObj, subtotal, isLocked) {
   for (var i = 1; i < rows.length; i++) {
     var rEventId = String(rows[i][0]);
     var rRound = String(rows[i][1]);
-    var rRole = String(rows[i][2]);
+    var rRole = normalizeRole(rows[i][2]);
     var rNo = Number(rows[i][3]);
 
-    if (rEventId === eventId && rRound === round && rRole === role && rNo === pNo) {
+    if (rEventId === eventId && rRound === round && rRole === normRole && rNo === pNo) {
       var rowIndex = i + 1;
+      sheet.getRange(rowIndex, 3).setValue(normRole);
       sheet.getRange(rowIndex, 5).setValue(pName);
       sheet.getRange(rowIndex, 6).setValue(songTitle);
       sheet.getRange(rowIndex, 7).setValue(subtotal);
@@ -225,7 +237,7 @@ function upsertSubmissionInSheet(data, role, scoresObj, subtotal, isLocked) {
   }
 
   // Append new row
-  sheet.appendRow([eventId, round, role, pNo, pName, songTitle, subtotal, scoresJSON, notes, timestamp, updatedAt, lockedVal]);
+  sheet.appendRow([eventId, round, normRole, pNo, pName, songTitle, subtotal, scoresJSON, notes, timestamp, updatedAt, lockedVal]);
 }
 
 function toggleLockInSheet(data) {
@@ -233,7 +245,7 @@ function toggleLockInSheet(data) {
   var rows = sheet.getDataRange().getValues();
   var eventId = data.eventId || "evt-dakota-2026";
   var round = data.round || "Round Penyisihan";
-  var role = String(data.role || "").toLowerCase();
+  var normRole = normalizeRole(data.role);
   var pNo = Number(data.participantNo);
   var isLocked = data.isLocked === true;
   var updatedAt = new Date().toISOString();
@@ -241,20 +253,20 @@ function toggleLockInSheet(data) {
   for (var i = 1; i < rows.length; i++) {
     var rEventId = String(rows[i][0]);
     var rRound = String(rows[i][1]);
-    var rRole = String(rows[i][2]).toLowerCase();
+    var rRole = normalizeRole(rows[i][2]);
     var rNo = Number(rows[i][3]);
 
-    if (rEventId === eventId && rRound === round && rRole === role && rNo === pNo) {
+    if (rEventId === eventId && rRound === round && rRole === normRole && rNo === pNo) {
       var rowIndex = i + 1;
       sheet.getRange(rowIndex, 12).setValue(isLocked);
       sheet.getRange(rowIndex, 11).setValue(updatedAt);
-      return { updated: true, role: role, participantNo: pNo, isLocked: isLocked };
+      return { updated: true, role: normRole, participantNo: pNo, isLocked: isLocked };
     }
   }
 
   // If submission row does not exist yet, create a placeholder row with isLocked value!
-  sheet.appendRow([eventId, round, role, pNo, "", "", 0, "{}", "", updatedAt, updatedAt, isLocked]);
-  return { updated: true, created: true, role: role, participantNo: pNo, isLocked: isLocked };
+  sheet.appendRow([eventId, round, normRole, pNo, "", "", 0, "{}", "", updatedAt, updatedAt, isLocked]);
+  return { updated: true, created: true, role: normRole, participantNo: pNo, isLocked: isLocked };
 }
 
 function readSubmissionsFromSheet() {
@@ -276,7 +288,7 @@ function readSubmissionsFromSheet() {
     var row = rows[i];
     var eventId = String(row[0]);
     var round = String(row[1]);
-    var role = String(row[2]).toLowerCase();
+    var role = normalizeRole(row[2]);
     var participantNo = Number(row[3]);
     var participantName = String(row[4]);
     var songTitle = String(row[5]);
