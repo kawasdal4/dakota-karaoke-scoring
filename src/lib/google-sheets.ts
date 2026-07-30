@@ -2,6 +2,15 @@ import { VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/typ
 import { getAdminSettings, saveAdminSettings, syncSubmissionsToStorage, RemoteSubmissions } from './storage';
 
 function getScriptUrl(): string | null {
+  if (typeof window !== 'undefined') {
+    const urlParam = new URLSearchParams(window.location.search).get('scriptUrl');
+    if (urlParam) {
+      localStorage.setItem('dakota_global_script_url', urlParam);
+      return urlParam;
+    }
+    const globalSaved = localStorage.getItem('dakota_global_script_url');
+    if (globalSaved) return globalSaved;
+  }
   const settings = getAdminSettings();
   return settings.googleScriptUrl || process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL || null;
 }

@@ -413,11 +413,19 @@ const DEFAULT_SETTINGS: AdminSettings = {
 };
 
 export function getAdminSettings(): AdminSettings {
-  return readJSON<AdminSettings>(KEYS.ADMIN_SETTINGS, DEFAULT_SETTINGS);
+  const settings = readJSON<AdminSettings>(KEYS.ADMIN_SETTINGS, DEFAULT_SETTINGS);
+  if (typeof window !== 'undefined' && !settings.googleScriptUrl) {
+    const globalSaved = localStorage.getItem('dakota_global_script_url');
+    if (globalSaved) settings.googleScriptUrl = globalSaved;
+  }
+  return settings;
 }
 
 export function saveAdminSettings(s: AdminSettings): void {
   writeJSON(KEYS.ADMIN_SETTINGS, s);
+  if (typeof window !== 'undefined' && s.googleScriptUrl) {
+    localStorage.setItem('dakota_global_script_url', s.googleScriptUrl);
+  }
 }
 
 // ─── Backup / Restore ────────────────────────────────────────
