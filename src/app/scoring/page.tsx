@@ -204,55 +204,52 @@ export default function ScoringPage() {
   const [isSyncing, setIsSyncing] = useState(false);
 
   // ─── Core helper: apply a single remote submission to React state ────────
-  const applyRemoteSubmission = (result: RemoteSubmissions, p: typeof participant, isGlobal: boolean) => {
+  const applyRemoteSubmission = (result: RemoteSubmissions, p: typeof participant, isGlobal: boolean): boolean => {
     if (!p) return false;
 
-    // Dual match: by participantId ('p1') OR by participantNo (1)
-    const findMatch = (list: any[]) =>
-      (list ?? []).find((s: any) => s.participantId === p!.id) ??
-      (list ?? []).find((s: any) => Number(s.participantNo) === Number(p!.no));
+    // 3-tier match strategy:
+    //  1. By participantId string ('p1')
+    //  2. By participantNo number (1)
+    //  3. Last resort: first entry in list (for single-entry Sheets)
+    const findMatch = (list: any[]): any => {
+      const arr = list ?? [];
+      // Tier 1: exact participantId
+      let m = arr.find((s: any) => String(s.participantId) === String(p!.id));
+      if (m) return m;
+      // Tier 2: participantNo number equality
+      m = arr.find((s: any) => Number(s.participantNo) === Number(p!.no));
+      if (m) return m;
+      // Tier 3: single-entry fallback (only one submission exists → apply it)
+      if (arr.length === 1) return arr[0];
+      return undefined;
+    };
+
+    const applyScores = (m: any, setter: (v: any) => void, keys: string[]) => {
+      const scores: Record<string, number> = {};
+      keys.forEach(k => { scores[k] = Number(m.scores?.[k]) || 0; });
+      setter(scores);
+      setNotes(m.notes ?? '');
+      setIsLocked(isGlobal || Boolean(m.isLocked));
+    };
 
     if (judge === 'Kenji') {
       const m = findMatch(result.vocal ?? []);
       if (m) {
-        setVocal({
-          accuracy:   Number(m.scores?.accuracy)   || 0,
-          character:  Number(m.scores?.character)  || 0,
-          tempo:      Number(m.scores?.tempo)      || 0,
-          technique:  Number(m.scores?.technique)  || 0,
-          expression: Number(m.scores?.expression) || 0,
-        });
-        setNotes(m.notes ?? '');
-        setIsLocked(isGlobal || Boolean(m.isLocked));
+        applyScores(m, setVocal, ['accuracy', 'character', 'tempo', 'technique', 'expression']);
         return true;
       }
       setIsLocked(isGlobal);
     } else if (judge === 'Ukey') {
       const m = findMatch(result.performance ?? []);
       if (m) {
-        setPerf({
-          expression: Number(m.scores?.expression) || 0,
-          confidence: Number(m.scores?.confidence) || 0,
-          appearance: Number(m.scores?.appearance) || 0,
-          gesture:    Number(m.scores?.gesture)    || 0,
-          creativity: Number(m.scores?.creativity) || 0,
-        });
-        setNotes(m.notes ?? '');
-        setIsLocked(isGlobal || Boolean(m.isLocked));
+        applyScores(m, setPerf, ['expression', 'confidence', 'appearance', 'gesture', 'creativity']);
         return true;
       }
       setIsLocked(isGlobal);
     } else if (judge === 'Revan') {
       const m = findMatch(result.staging ?? []);
       if (m) {
-        setStaging({
-          interaction:         Number(m.scores?.interaction)         || 0,
-          communication:      Number(m.scores?.communication)      || 0,
-          roomAtmosphere:     Number(m.scores?.roomAtmosphere)     || 0,
-          audienceEngagement: Number(m.scores?.audienceEngagement) || 0,
-        });
-        setNotes(m.notes ?? '');
-        setIsLocked(isGlobal || Boolean(m.isLocked));
+        applyScores(m, setStaging, ['interaction', 'communication', 'roomAtmosphere', 'audienceEngagement']);
         return true;
       }
       setIsLocked(isGlobal);
@@ -269,17 +266,33 @@ export default function ScoringPage() {
     try {
       const result = await fetchSubmissionsFromSheets();
       if (result) {
+        // Debug: log raw result so user can check browser console
+        const vLen = result.vocal?.length ?? 0;
+        const pLen = result.performance?.length ?? 0;
+        const sLen = result.staging?.length ?? 0;
+        console.log(
+          `[Sync] Sheets data — vocal:${vLen} perf:${pLen} staging:${sLen}`,
+          '| participant id:', participant.id, 'no:', participant.no,
+          '| raw:', JSON.stringify(result)
+        );
         const settings = getAdminSettings();
         const found = applyRemoteSubmission(result, participant, settings.isGlobalScoringLocked);
         if (found) {
           showToast('\u2705 Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
         } else {
-          showToast('\u26a0\ufe0f Sync OK tapi belum ada data untuk peserta ini di Sheets.', 'info');
+          const total = vLen + pLen + sLen;
+          showToast(
+            total > 0
+              ? `\u26a0\ufe0f Ada ${total} data di Sheets tapi tidak cocok. Cek konsol browser (F12).`
+              : '\u26a0\ufe0f SUBMISSIONS sheet masih kosong. Submit nilai dulu dari form juri.',
+            'info'
+          );
         }
       } else {
-        showToast('\u26a0\ufe0f Gagal sinkronisasi. Cek URL Google Script di .env.local.', 'error');
+        showToast('\u26a0\ufe0f Gagal menjangkau Google Script. Cek URL di .env.local.', 'error');
       }
     } catch (err: any) {
+      console.error('[Sync] Error:', err);
       showToast('\u274c Error sinkronisasi: ' + err.message, 'error');
     } finally {
       setIsSyncing(false);

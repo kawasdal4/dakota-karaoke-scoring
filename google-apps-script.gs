@@ -269,15 +269,136 @@ function toggleLockInSheet(data) {
   return { updated: true, created: true, role: normRole, participantNo: pNo, isLocked: isLocked };
 }
 
+function readScoringCellsAsFallback() {
+  // When SUBMISSIONS sheet has no data, read from the scoring cells directly.
+  // This supports the case where scores were entered directly in the spreadsheet.
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var allSheets = ss.getSheets();
+  var vocalList = [];
+  var performanceList = [];
+  var stagingList = [];
+  var now = new Date().toISOString();
+
+  // Look for sheets with scoring cells (not SUBMISSIONS, AUTH, Penyisihan)
+  var skipNames = ["SUBMISSIONS", "AUTH", "Penyisihan", "Semifinal", "Grand Final"];
+
+  for (var si = 0; si < allSheets.length; si++) {
+    var sh = allSheets[si];
+    var shName = sh.getName();
+    if (skipNames.indexOf(shName) >= 0) continue;
+
+    try {
+      // Try reading vocal scores (C7:C12)
+      var vocalRange = sh.getRange("C7:C12");
+      var vocalVals = vocalRange.getValues();
+      var accuracy = Number(vocalVals[0][0]);
+      var character = Number(vocalVals[1][0]);
+      var tempo = Number(vocalVals[2][0]);
+      var technique = Number(vocalVals[3][0]);
+      var expression = Number(vocalVals[4][0]);
+      var vocalSubtotal = Number(vocalVals[5][0]);
+
+      // Only include if at least one score > 0
+      if (accuracy > 0 || character > 0 || tempo > 0 || technique > 0 || expression > 0) {
+        vocalList.push({
+          id: "sub-vocal-0",
+          eventId: "evt-dakota-2026",
+          round: "Round Penyisihan",
+          participantId: "p0",
+          participantNo: 0,
+          participantName: "Dari Sheet: " + shName,
+          songTitle: "",
+          scores: { accuracy: accuracy, character: character, tempo: tempo, technique: technique, expression: expression },
+          subtotal: vocalSubtotal,
+          notes: "",
+          isLocked: false,
+          timestamp: now,
+          deviceInfo: "ScoringSheet",
+          userAgent: "GoogleAppsScript"
+        });
+      }
+
+      // Try reading performance scores (C16:C21)
+      var perfRange = sh.getRange("C16:C21");
+      var perfVals = perfRange.getValues();
+      var perfExpr = Number(perfVals[0][0]);
+      var confidence = Number(perfVals[1][0]);
+      var appearance = Number(perfVals[2][0]);
+      var gesture = Number(perfVals[3][0]);
+      var creativity = Number(perfVals[4][0]);
+      var perfSubtotal = Number(perfVals[5][0]);
+
+      if (perfExpr > 0 || confidence > 0 || appearance > 0 || gesture > 0 || creativity > 0) {
+        performanceList.push({
+          id: "sub-performance-0",
+          eventId: "evt-dakota-2026",
+          round: "Round Penyisihan",
+          participantId: "p0",
+          participantNo: 0,
+          participantName: "Dari Sheet: " + shName,
+          songTitle: "",
+          scores: { expression: perfExpr, confidence: confidence, appearance: appearance, gesture: gesture, creativity: creativity },
+          subtotal: perfSubtotal,
+          notes: "",
+          isLocked: false,
+          timestamp: now,
+          deviceInfo: "ScoringSheet",
+          userAgent: "GoogleAppsScript"
+        });
+      }
+
+      // Try reading staging scores (C25:C29)
+      var stagingRange = sh.getRange("C25:C29");
+      var stagingVals = stagingRange.getValues();
+      var interaction = Number(stagingVals[0][0]);
+      var communication = Number(stagingVals[1][0]);
+      var roomAtmosphere = Number(stagingVals[2][0]);
+      var audienceEngagement = Number(stagingVals[3][0]);
+      var stagingSubtotal = Number(stagingVals[4][0]);
+
+      if (interaction > 0 || communication > 0 || roomAtmosphere > 0 || audienceEngagement > 0) {
+        stagingList.push({
+          id: "sub-staging-0",
+          eventId: "evt-dakota-2026",
+          round: "Round Penyisihan",
+          participantId: "p0",
+          participantNo: 0,
+          participantName: "Dari Sheet: " + shName,
+          songTitle: "",
+          scores: { interaction: interaction, communication: communication, roomAtmosphere: roomAtmosphere, audienceEngagement: audienceEngagement },
+          subtotal: stagingSubtotal,
+          notes: "",
+          isLocked: false,
+          timestamp: now,
+          deviceInfo: "ScoringSheet",
+          userAgent: "GoogleAppsScript"
+        });
+      }
+    } catch(sheetReadErr) {
+      Logger.log("readScoringCellsAsFallback: error reading sheet " + shName + ": " + sheetReadErr);
+    }
+  }
+
+  return { vocal: vocalList, performance: performanceList, staging: stagingList };
+}
+
 function readSubmissionsFromSheet() {
   var sheet = getSubmissionsSheet();
   var globalLockStr = PropertiesService.getScriptProperties().getProperty("isGlobalScoringLocked");
   var isGlobalScoringLocked = globalLockStr === "true";
 
-  if (!sheet) return { isGlobalScoringLocked: isGlobalScoringLocked, vocal: [], performance: [], staging: [] };
+  if (!sheet) {
+    // No SUBMISSIONS sheet — try reading from scoring cells
+    var fallback = readScoringCellsAsFallback();
+    return Object.assign({ isGlobalScoringLocked: isGlobalScoringLocked }, fallback);
+  }
 
   var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { isGlobalScoringLocked: isGlobalScoringLocked, vocal: [], performance: [], staging: [] };
+  if (lastRow < 2) {
+    // SUBMISSIONS sheet is empty — try reading from scoring cells as fallback
+    var fallback = readScoringCellsAsFallback();
+    return Object.assign({ isGlobalScoringLocked: isGlobalScoringLocked }, fallback);
+  }
 
   var rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
   var vocalList = [];
