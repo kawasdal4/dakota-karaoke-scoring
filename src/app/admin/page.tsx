@@ -74,6 +74,29 @@ export default function AdminPage() {
     }
   };
 
+  // Load local state only (without re-fetching from Sheets)
+  const loadLocal = async () => {
+    try {
+      const parts = await fetchParticipants();
+      const evt = getActiveEvent();
+      evt.participants = parts.map((p) => ({
+        id: `p${p.number}`,
+        no: p.number,
+        name: p.name,
+        songTitle: 'TBA',
+        category: 'Umum'
+      }));
+      evt.totalParticipants = parts.length;
+      setActiveEvent(evt);
+    } catch { /* keep existing participants */ }
+    const allEvents = getStoredEvents();
+    const active = getActiveEvent();
+    setEvents(allEvents);
+    setActiveEvent(active);
+    setSettings(getAdminSettings());
+    setAuditLogs(getAuditLogs().slice(0, 50));
+  };
+
   const load = async () => {
     await fetchSubmissionsFromSheets().catch(() => {});
     // 1. Fetch live participants from Google Sheets first
@@ -201,7 +224,8 @@ export default function AdminPage() {
       showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI.`, 'info');
     }
     toggleLockToSheets(activeEvent.id, round, judge, pNo, newLockState);
-    load();
+    // Use loadLocal() to avoid re-fetching from Sheets (which may not have processed the lock yet)
+    loadLocal();
   };
 
   // Open Edit modal for a submission

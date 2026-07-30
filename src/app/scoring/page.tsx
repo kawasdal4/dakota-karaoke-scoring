@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, ChevronRight, Play, Pause, RotateCcw,
@@ -16,7 +16,7 @@ import {
   getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
   saveDraft, getDraft,
 } from '@/lib/storage';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets } from '@/lib/google-sheets';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
@@ -63,6 +63,10 @@ export default function ScoringPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Prevents auto-poll from reverting a lock change the user just made
+  const lastLockActionRef = useRef<number>(0);
+  const LOCK_DEBOUNCE_MS = 15000;
 
   const fetchAndInit = async (session: JudgeRole) => {
     setIsLoading(true);
@@ -186,7 +190,6 @@ export default function ScoringPage() {
     try {
       const result = await fetchSubmissionsFromSheets();
       if (result) {
-        // Read fresh data directly from result (already stored to localStorage by fetchSubmissionsFromSheets)
         const settings = getAdminSettings();
         const isGlobal = settings.isGlobalScoringLocked;
 
@@ -195,34 +198,28 @@ export default function ScoringPage() {
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
           if (existing) {
-            setVocal(existing.scores);
+            setVocal({ accuracy: Number(existing.scores.accuracy), character: Number(existing.scores.character), tempo: Number(existing.scores.tempo), technique: Number(existing.scores.technique), expression: Number(existing.scores.expression) });
             setNotes(existing.notes ?? '');
             setIsLocked(isGlobal || existing.isLocked);
-          } else {
-            setIsLocked(isGlobal);
-          }
+          } else { setIsLocked(isGlobal); }
         } else if (judge === 'Ukey') {
           const existing = (result.performance ?? []).find(
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
           if (existing) {
-            setPerf(existing.scores);
+            setPerf({ expression: Number(existing.scores.expression), confidence: Number(existing.scores.confidence), appearance: Number(existing.scores.appearance), gesture: Number(existing.scores.gesture), creativity: Number(existing.scores.creativity) });
             setNotes(existing.notes ?? '');
             setIsLocked(isGlobal || existing.isLocked);
-          } else {
-            setIsLocked(isGlobal);
-          }
+          } else { setIsLocked(isGlobal); }
         } else if (judge === 'Revan') {
           const existing = (result.staging ?? []).find(
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
           if (existing) {
-            setStaging(existing.scores);
+            setStaging({ interaction: Number(existing.scores.interaction), communication: Number(existing.scores.communication), roomAtmosphere: Number(existing.scores.roomAtmosphere), audienceEngagement: Number(existing.scores.audienceEngagement) });
             setNotes(existing.notes ?? '');
             setIsLocked(isGlobal || existing.isLocked);
-          } else {
-            setIsLocked(isGlobal);
-          }
+          } else { setIsLocked(isGlobal); }
         }
         showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
       } else {
@@ -261,6 +258,11 @@ export default function ScoringPage() {
     };
 
     const syncFromSheetsAndRefresh = async () => {
+      // Skip if user just changed a lock — let Sheets process it first
+      if (Date.now() - lastLockActionRef.current < LOCK_DEBOUNCE_MS) {
+        syncLockState();
+        return;
+      }
       try {
         const result = await fetchSubmissionsFromSheets();
         if (!result || !participant || !event) { syncLockState(); return; }
@@ -270,20 +272,29 @@ export default function ScoringPage() {
           const ex = (result.vocal ?? []).find(
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
-          if (ex) { setVocal(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
-          else { setIsLocked(isGlobal); }
+          if (ex) {
+            setVocal({ accuracy: Number(ex.scores.accuracy), character: Number(ex.scores.character), tempo: Number(ex.scores.tempo), technique: Number(ex.scores.technique), expression: Number(ex.scores.expression) });
+            setNotes(ex.notes ?? '');
+            setIsLocked(isGlobal || ex.isLocked);
+          } else { setIsLocked(isGlobal); }
         } else if (judge === 'Ukey') {
           const ex = (result.performance ?? []).find(
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
-          if (ex) { setPerf(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
-          else { setIsLocked(isGlobal); }
+          if (ex) {
+            setPerf({ expression: Number(ex.scores.expression), confidence: Number(ex.scores.confidence), appearance: Number(ex.scores.appearance), gesture: Number(ex.scores.gesture), creativity: Number(ex.scores.creativity) });
+            setNotes(ex.notes ?? '');
+            setIsLocked(isGlobal || ex.isLocked);
+          } else { setIsLocked(isGlobal); }
         } else if (judge === 'Revan') {
           const ex = (result.staging ?? []).find(
             (s) => s.participantId === participant.id && s.eventId === event.id && s.round === event.currentRound
           );
-          if (ex) { setStaging(ex.scores); setNotes(ex.notes ?? ''); setIsLocked(isGlobal || ex.isLocked); }
-          else { setIsLocked(isGlobal); }
+          if (ex) {
+            setStaging({ interaction: Number(ex.scores.interaction), communication: Number(ex.scores.communication), roomAtmosphere: Number(ex.scores.roomAtmosphere), audienceEngagement: Number(ex.scores.audienceEngagement) });
+            setNotes(ex.notes ?? '');
+            setIsLocked(isGlobal || ex.isLocked);
+          } else { setIsLocked(isGlobal); }
         }
       } catch { syncLockState(); }
     };
@@ -328,6 +339,10 @@ export default function ScoringPage() {
   // Admin lock toggle directly from scoring page
   const handleAdminToggleLock = () => {
     if (!participant || !event) return;
+    const pNo = parseInt(participant.id.replace('p', '')) || 0;
+    const newLockState = !isLocked;
+    // Mark timestamp so auto-poll won't override for 15s
+    lastLockActionRef.current = Date.now();
     if (isLocked) {
       if (judge === 'Kenji') unlockVocal(event.id, event.currentRound, participant.id);
       else if (judge === 'Ukey') unlockPerformance(event.id, event.currentRound, participant.id);
@@ -341,6 +356,8 @@ export default function ScoringPage() {
       setIsLocked(true);
       showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI oleh Admin.`, 'info');
     }
+    // Sync lock change to Google Sheets
+    toggleLockToSheets(event.id, event.currentRound, judge, pNo, newLockState);
   };
 
   // Save handler
