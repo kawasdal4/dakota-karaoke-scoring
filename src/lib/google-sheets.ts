@@ -1,6 +1,8 @@
 import { VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
 import { getAdminSettings, saveAdminSettings, syncSubmissionsToStorage, RemoteSubmissions } from './storage';
 
+const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwLjIYlTeMPnEKkhTrZ8mEiKKRSqFpi1y_YzIBcNfeUfUfRR9xayvJ-Dx_pmvC9aj5xKA/exec';
+
 function getScriptUrl(): string | null {
   if (typeof window !== 'undefined') {
     const urlParam = new URLSearchParams(window.location.search).get('scriptUrl');
@@ -12,7 +14,7 @@ function getScriptUrl(): string | null {
     if (globalSaved) return globalSaved;
   }
   const settings = getAdminSettings();
-  return settings.googleScriptUrl || process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL || null;
+  return settings.googleScriptUrl || process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL || DEFAULT_SCRIPT_URL;
 }
 
 export interface AuthResponse {
@@ -107,8 +109,7 @@ export async function submitVocalToSheets(sub: VocalSubmission): Promise<void> {
   try {
     await fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'saveVocal',
         eventId: sub.eventId,
@@ -142,8 +143,7 @@ export async function submitPerformanceToSheets(sub: PerformanceSubmission): Pro
   try {
     await fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'savePerformance',
         eventId: sub.eventId,
@@ -177,8 +177,7 @@ export async function submitStagingToSheets(sub: StagingSubmission): Promise<voi
   try {
     await fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'saveStaging',
         eventId: sub.eventId,
@@ -249,7 +248,7 @@ export async function fetchSubmissionsFromSheets(): Promise<RemoteSubmissions | 
   if (!baseUrl) return null;
 
   try {
-    const url = `${baseUrl}?action=getSubmissions`;
+    const url = `${baseUrl}?action=getSubmissions&t=${Date.now()}`;
     const res = await fetch(url, { method: 'GET', cache: 'no-store' });
     if (!res.ok) return null;
 
@@ -300,8 +299,7 @@ export async function toggleLockToSheets(
   try {
     await fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'toggleLock',
         eventId,
@@ -323,8 +321,7 @@ export async function saveGlobalLockToSheets(isGlobalScoringLocked: boolean): Pr
   try {
     await fetch(url, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'saveGlobalLock',
         isGlobalScoringLocked,

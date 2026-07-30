@@ -408,7 +408,7 @@ export function getAuditLogs(): AuditLogEntry[] {
 
 const DEFAULT_SETTINGS: AdminSettings = {
   activeEventId: INITIAL_EVENT.id,
-  googleScriptUrl: '',
+  googleScriptUrl: process.env.NEXT_PUBLIC_GOOGLE_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbwLjIYlTeMPnEKkhTrZ8mEiKKRSqFpi1y_YzIBcNfeUfUfRR9xayvJ-Dx_pmvC9aj5xKA/exec',
   isGlobalScoringLocked: false,
 };
 

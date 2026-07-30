@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, ChevronRight, Play, Pause, RotateCcw,
-  Save, Lock, Unlock, Music, Clock, Sparkles, FileText, UserCheck,
+  Save, Lock, Unlock, Music, Clock, Sparkles, FileText, UserCheck, RefreshCw,
 } from 'lucide-react';
 import StepperInput from '@/components/ui/stepper-input';
 import ConfirmationModal from '@/components/ui/modal';
@@ -121,8 +121,7 @@ export default function ScoringPage() {
   const formatTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  // Load existing submission or draft when participant changes
-  useEffect(() => {
+  const refreshCurrentScores = () => {
     if (!participant || !event) return;
     const settings = getAdminSettings();
     const isGlobal = settings.isGlobalScoringLocked;
@@ -169,7 +168,31 @@ export default function ScoringPage() {
       setNotes('');
       setIsLocked(isGlobal);
     }
+  };
+
+  // Load existing submission or draft when participant changes
+  useEffect(() => {
+    refreshCurrentScores();
   }, [currentIndex, event, judge]);
+
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSyncSheets = async () => {
+    setIsSyncing(true);
+    try {
+      const result = await fetchSubmissionsFromSheets();
+      if (result) {
+        showToast('Berhasil sinkronisasi data dari Google Sheets!', 'success');
+        refreshCurrentScores();
+      } else {
+        showToast('Gagal sinkronisasi data.', 'error');
+      }
+    } catch (err: any) {
+      showToast('Error sinkronisasi: ' + err.message, 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Live storage / focus listener to pick up Admin unlock changes dynamically
   useEffect(() => {
@@ -351,6 +374,22 @@ export default function ScoringPage() {
 
   return (
     <div className="p-4 flex flex-col gap-5 pb-32">
+
+      {/* ── HEADER SYNC BAR ─────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-black text-white flex items-center gap-2">
+          <span>{judge.toUpperCase()} SCORING</span>
+        </h1>
+        <button
+          onClick={handleSyncSheets}
+          disabled={isSyncing}
+          className="px-3 py-1.5 rounded-xl bg-purple-600/30 border border-purple-500/50 text-purple-300 text-xs font-bold flex items-center gap-1.5 hover:bg-purple-600/50 transition-all disabled:opacity-50"
+          title="Sinkronisasi data nilai dari Google Sheets ke web app"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+          <span>{isSyncing ? 'Syncing...' : 'Sync Sheets'}</span>
+        </button>
+      </div>
 
       {/* ── ADMIN ROLE SWITCHER (Only visible when logged in as Admin) ── */}
       {isAdminSession && (
