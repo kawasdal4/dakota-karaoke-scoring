@@ -20,7 +20,7 @@ import {
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
   detectDevice
 } from '@/lib/utils';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets, saveGlobalLockToSheets } from '@/lib/google-sheets';
 import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import StepperInput from '@/components/ui/stepper-input';
@@ -149,6 +149,7 @@ export default function AdminPage() {
     const next = { ...settings, isGlobalScoringLocked: !settings.isGlobalScoringLocked };
     setSettings(next);
     saveAdminSettings(next);
+    saveGlobalLockToSheets(next.isGlobalScoringLocked);
     showToast(next.isGlobalScoringLocked ? 'Scoring TERKUNCI global.' : 'Scoring DIBUKA global.', 'info');
   };
 

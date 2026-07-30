@@ -1,5 +1,5 @@
 import { VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
-import { getAdminSettings, syncSubmissionsToStorage, RemoteSubmissions } from './storage';
+import { getAdminSettings, saveAdminSettings, syncSubmissionsToStorage, RemoteSubmissions } from './storage';
 
 function getScriptUrl(): string | null {
   const settings = getAdminSettings();
@@ -246,6 +246,12 @@ export async function fetchSubmissionsFromSheets(): Promise<RemoteSubmissions | 
 
     const data = await res.json();
     if (data.status === 'success') {
+      if (typeof data.isGlobalScoringLocked === 'boolean') {
+        const settings = getAdminSettings();
+        if (settings.isGlobalScoringLocked !== data.isGlobalScoringLocked) {
+          saveAdminSettings({ ...settings, isGlobalScoringLocked: data.isGlobalScoringLocked });
+        }
+      }
       const remoteData: RemoteSubmissions = {
         vocal: data.vocal || [],
         performance: data.performance || [],
@@ -290,5 +296,25 @@ export async function toggleLockToSheets(
     console.warn('[Sheets] toggleLock submit error:', err);
   }
 }
+
+export async function saveGlobalLockToSheets(isGlobalScoringLocked: boolean): Promise<void> {
+  const url = getScriptUrl();
+  if (!url) return;
+
+  try {
+    await fetch(url, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'saveGlobalLock',
+        isGlobalScoringLocked,
+      }),
+    });
+  } catch (err) {
+    console.warn('[Sheets] saveGlobalLock submit error:', err);
+  }
+}
+
 
 

@@ -10,7 +10,7 @@ import StepperInput from '@/components/ui/stepper-input';
 import ConfirmationModal from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
 import {
-  getStoredJudge, getActiveEvent,
+  getStoredJudge, getActiveEvent, getAdminSettings,
   getVocalSubmissions, saveVocalSubmission, unlockVocal, lockVocal,
   getPerformanceSubmissions, savePerformanceSubmission, unlockPerformance, lockPerformance,
   getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
@@ -124,6 +124,8 @@ export default function ScoringPage() {
   // Load existing submission or draft when participant changes
   useEffect(() => {
     if (!participant || !event) return;
+    const settings = getAdminSettings();
+    const isGlobal = settings.isGlobalScoringLocked;
 
     if (judge === 'Kenji') {
       const subs = getVocalSubmissions(event.id, event.currentRound);
@@ -131,13 +133,13 @@ export default function ScoringPage() {
       if (existing) {
         setVocal(existing.scores);
         setNotes(existing.notes ?? '');
-        setIsLocked(existing.isLocked);
+        setIsLocked(isGlobal || existing.isLocked);
         return;
       }
       const draft = getDraft(judge, participant.id) as VocalScores | null;
       setVocal(draft ?? DEFAULT_VOCAL);
       setNotes('');
-      setIsLocked(false);
+      setIsLocked(isGlobal);
 
     } else if (judge === 'Ukey') {
       const subs = getPerformanceSubmissions(event.id, event.currentRound);
@@ -145,13 +147,13 @@ export default function ScoringPage() {
       if (existing) {
         setPerf(existing.scores);
         setNotes(existing.notes ?? '');
-        setIsLocked(existing.isLocked);
+        setIsLocked(isGlobal || existing.isLocked);
         return;
       }
       const draft = getDraft(judge, participant.id) as PerformanceScores | null;
       setPerf(draft ?? DEFAULT_PERF);
       setNotes('');
-      setIsLocked(false);
+      setIsLocked(isGlobal);
 
     } else if (judge === 'Revan') {
       const subs = getStagingSubmissions(event.id, event.currentRound);
@@ -159,13 +161,13 @@ export default function ScoringPage() {
       if (existing) {
         setStaging(existing.scores);
         setNotes(existing.notes ?? '');
-        setIsLocked(existing.isLocked);
+        setIsLocked(isGlobal || existing.isLocked);
         return;
       }
       const draft = getDraft(judge, participant.id) as StagingScores | null;
       setStaging(draft ?? DEFAULT_STAGING);
       setNotes('');
-      setIsLocked(false);
+      setIsLocked(isGlobal);
     }
   }, [currentIndex, event, judge]);
 
@@ -173,18 +175,24 @@ export default function ScoringPage() {
   useEffect(() => {
     const syncLockState = () => {
       if (!participant || !event) return;
+      const settings = getAdminSettings();
+      if (settings.isGlobalScoringLocked) {
+        setIsLocked(true);
+        return;
+      }
+
       if (judge === 'Kenji') {
         const subs = getVocalSubmissions(event.id, event.currentRound);
         const existing = subs.find((s) => s.participantId === participant.id);
-        if (existing) setIsLocked(existing.isLocked);
+        setIsLocked(existing ? existing.isLocked : false);
       } else if (judge === 'Ukey') {
         const subs = getPerformanceSubmissions(event.id, event.currentRound);
         const existing = subs.find((s) => s.participantId === participant.id);
-        if (existing) setIsLocked(existing.isLocked);
+        setIsLocked(existing ? existing.isLocked : false);
       } else if (judge === 'Revan') {
         const subs = getStagingSubmissions(event.id, event.currentRound);
         const existing = subs.find((s) => s.participantId === participant.id);
-        if (existing) setIsLocked(existing.isLocked);
+        setIsLocked(existing ? existing.isLocked : false);
       }
     };
 

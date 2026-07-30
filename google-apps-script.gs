@@ -46,6 +46,9 @@ function doPost(e) {
     } else if (data.action === "toggleLock") {
       result = toggleLockInSheet(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "saveGlobalLock") {
+      PropertiesService.getScriptProperties().setProperty("isGlobalScoringLocked", String(data.isGlobalScoringLocked));
+      return ContentService.createTextOutput(JSON.stringify({ status: 'success', isGlobalScoringLocked: data.isGlobalScoringLocked })).setMimeType(ContentService.MimeType.JSON);
     } else {
       throw new Error("Action tidak dikenali: " + data.action);
     }
@@ -232,7 +235,7 @@ function toggleLockInSheet(data) {
   var round = data.round || "Round Penyisihan";
   var role = String(data.role || "").toLowerCase();
   var pNo = Number(data.participantNo);
-  var isLocked = data.isLocked;
+  var isLocked = data.isLocked === true;
   var updatedAt = new Date().toISOString();
 
   for (var i = 1; i < rows.length; i++) {
@@ -248,15 +251,21 @@ function toggleLockInSheet(data) {
       return { updated: true, role: role, participantNo: pNo, isLocked: isLocked };
     }
   }
-  return { updated: false, message: "Data nilai tidak ditemukan di sheet." };
+
+  // If submission row does not exist yet, create a placeholder row with isLocked value!
+  sheet.appendRow([eventId, round, role, pNo, "", "", 0, "{}", "", updatedAt, updatedAt, isLocked]);
+  return { updated: true, created: true, role: role, participantNo: pNo, isLocked: isLocked };
 }
 
 function readSubmissionsFromSheet() {
   var sheet = getSubmissionsSheet();
-  if (!sheet) return { vocal: [], performance: [], staging: [] };
+  var globalLockStr = PropertiesService.getScriptProperties().getProperty("isGlobalScoringLocked");
+  var isGlobalScoringLocked = globalLockStr === "true";
+
+  if (!sheet) return { isGlobalScoringLocked: isGlobalScoringLocked, vocal: [], performance: [], staging: [] };
 
   var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { vocal: [], performance: [], staging: [] };
+  if (lastRow < 2) return { isGlobalScoringLocked: isGlobalScoringLocked, vocal: [], performance: [], staging: [] };
 
   var rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
   var vocalList = [];
@@ -276,7 +285,7 @@ function readSubmissionsFromSheet() {
     var notes = String(row[8]);
     var timestamp = String(row[9]);
     var isLockedVal = row[11];
-    var isLocked = (isLockedVal === true || String(isLockedVal).toLowerCase() === "true" || isLockedVal === "");
+    var isLocked = (isLockedVal === true || String(isLockedVal).toLowerCase() === "true");
 
     var scores = {};
     try {
@@ -310,7 +319,7 @@ function readSubmissionsFromSheet() {
     }
   }
 
-  return { vocal: vocalList, performance: performanceList, staging: stagingList };
+  return { isGlobalScoringLocked: isGlobalScoringLocked, vocal: vocalList, performance: performanceList, staging: stagingList };
 }
 
 // ─── SCORING ACTIONS (Sesuai Mapping) ─────────────────────────
