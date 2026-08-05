@@ -869,6 +869,48 @@ function getAllLockStatus(e) {
   return ContentService.createTextOutput(JSON.stringify({ status: "success", lockStatuses: rows })).setMimeType(ContentService.MimeType.JSON);
 }
 
+// ─── GET PARTICIPANT SCORES ───────────────────────────────────────
+function getParticipantScores(e) {
+  var round = e.parameter.round;
+  var participantName = e.parameter.participantName;
+  var judge = e.parameter.judge;
+  if (!round || !participantName || !judge) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Missing parameters" })).setMimeType(ContentService.MimeType.JSON);
+  }
+  var data = readSubmissionsFromSheet();
+  var roleMap = { Kenji: "vocal", Ukey: "performance", Revan: "staging" };
+  var role = roleMap[judge] || judge.toLowerCase();
+  var list = data[role] || [];
+  for (var i = 0; i < list.length; i++) {
+    var sub = list[i];
+    if (String(sub.round) === round && String(sub.participantName) === participantName) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        round: sub.round,
+        participantName: sub.participantName,
+        judge: judge,
+        scores: sub.scores || {},
+        subtotal: sub.subtotal || 0,
+        notes: sub.notes || "",
+        isLocked: sub.isLocked === true || String(sub.isLocked).toLowerCase() === "true",
+        updatedAt: sub.updatedAt || ""
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  // Not found – default empty
+  return ContentService.createTextOutput(JSON.stringify({
+    status: "success",
+    round: round,
+    participantName: participantName,
+    judge: judge,
+    scores: {},
+    subtotal: 0,
+    notes: "",
+    isLocked: false,
+    updatedAt: ""
+  })).setMimeType(ContentService.MimeType.JSON);
+}
+
 function getOrCreateLockSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("LOCK_STATUS");

@@ -425,6 +425,39 @@ export async function getLockStatusFromSheets(
   }
 }
 
+// ─── GET PARTICIPANT SCORES ───────────────────────────────────────
+export async function getParticipantScoresFromSheets(
+  round: string,
+  participantName: string,
+  judge: string
+): Promise<any> {
+  const baseUrl = getScriptUrl();
+  if (!baseUrl) {
+    throw new Error('Script URL belum diatur');
+  }
+  const normRound = round.trim().toLowerCase();
+  const url = `${baseUrl}?action=getParticipantScores&round=${encodeURIComponent(normRound)}&participantName=${encodeURIComponent(participantName)}&judge=${encodeURIComponent(judge)}&_=${Date.now()}`;
+  const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return await res.json();
+}
+
+export async function fetchAllLockStatuses(): Promise<any> {
+  const baseUrl = getScriptUrl();
+  if (!baseUrl) return [];
+  const url = `${baseUrl}?action=getAllLockStatuses&_=${Date.now()}`;
+  try {
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.warn('[LockStatus] fetchAllLockStatuses error:', err);
+    return [];
+  }
+}
+
 /**
  * setLockStatusToSheets
  * POST to Google Sheets LOCK_STATUS sheet (upsert row).

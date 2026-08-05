@@ -22,6 +22,7 @@ import {
   submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets,
   fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets,
   setLockStatusToSheets,
+  getParticipantScoresFromSheets,
 } from '@/lib/google-sheets';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
@@ -161,7 +162,7 @@ export default function ScoringPage() {
   const formatTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const refreshCurrentScores = (overrideParticipant?: typeof participant, overrideEvent?: typeof event) => {
+
     const p = overrideParticipant ?? participant;
     const ev = overrideEvent ?? event;
     if (!p || !ev) return;
@@ -307,32 +308,40 @@ export default function ScoringPage() {
     }
     setIsSyncing(true);
     try {
-      const result = await fetchSubmissionsFromSheets();
-      if (result) {
-        // Debug: log raw result so user can check browser console
-        const vLen = result.vocal?.length ?? 0;
-        const pLen = result.performance?.length ?? 0;
-        const sLen = result.staging?.length ?? 0;
-        console.log(
-          `[Sync] Sheets data — vocal:${vLen} perf:${pLen} staging:${sLen}`,
-          '| participant id:', participant.id, 'no:', participant.no,
-          '| raw:', JSON.stringify(result)
-        );
-        const settings = getAdminSettings();
-        const found = applyRemoteSubmission(result, participant, settings.isGlobalScoringLocked);
-        if (found) {
-          showToast('\u2705 Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
-        } else {
-          const total = vLen + pLen + sLen;
-          showToast(
-            total > 0
-              ? `\u26a0\ufe0f Ada ${total} data di Sheets tapi tidak cocok. Cek konsol browser (F12).`
-              : '\u26a0\ufe0f SUBMISSIONS sheet masih kosong. Submit nilai dulu dari form juri.',
-            'info'
-          );
+      const result = await getParticipantScoresFromSheets(event.currentRound, participant.name, judge);
+      if (result && result.status === 'success') {
+        const { scores, notes: remoteNotes, isLocked: remoteLocked } = result;
+        if (judge === 'Kenji') {
+          setVocal({
+            accuracy: Number(scores?.accuracy) || 0,
+            character: Number(scores?.character) || 0,
+            tempo: Number(scores?.tempo) || 0,
+            technique: Number(scores?.technique) || 0,
+            expression: Number(scores?.expression) || 0,
+          });
+        } else if (judge === 'Ukey') {
+          setPerf({
+            expression: Number(scores?.expression) || 0,
+            confidence: Number(scores?.confidence) || 0,
+            appearance: Number(scores?.appearance) || 0,
+            gesture: Number(scores?.gesture) || 0,
+            creativity: Number(scores?.creativity) || 0,
+          });
+        } else if (judge === 'Revan') {
+          setStaging({
+            interaction: Number(scores?.interaction) || 0,
+            communication: Number(scores?.communication) || 0,
+            roomAtmosphere: Number(scores?.roomAtmosphere) || 0,
+            audienceEngagement: Number(scores?.audienceEngagement) || 0,
+          });
         }
+        setNotes(remoteNotes ?? '');
+        const settings = getAdminSettings();
+        setIsLocked(settings.isGlobalScoringLocked || Boolean(remoteLocked));
+        showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
       } else {
-        showToast('\u26a0\ufe0f Gagal menjangkau Google Script. Cek URL di .env.local.', 'error');
+        const msg = result && result.message ? result.message : 'Gagal menjangkau Google Script.';
+        showToast(`⚠️ ${msg}`, 'error');
       }
     } catch (err: any) {
       console.error('[Sync] Error:', err);
