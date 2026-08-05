@@ -43,17 +43,26 @@ export default function LoginPage() {
     setIsSubmitting(true);
     setErrorMsg(null);
 
-    const verifyRes = await verifyPin(selectedRole, pin);
-    setIsSubmitting(false);
+    try {
+      const verifyRes = await verifyPin(selectedRole, pin);
+      setIsSubmitting(false);
 
-    if (!verifyRes.success) {
-      setErrorMsg(verifyRes.message || 'PIN salah. Silakan coba lagi.');
+      if (!verifyRes.success) {
+        const errDetail = verifyRes.message || 'PIN salah. Silakan coba lagi.';
+        console.error('[Dakota Login Error]', errDetail);
+        setErrorMsg(errDetail);
+        setPin('');
+        return;
+      }
+
+      showToast(`Berhasil masuk sebagai ${selectedRole}`, 'success');
+      router.replace(selectedRole === 'Admin' ? '/admin' : '/');
+    } catch (error: any) {
+      console.error('[Dakota Login Error]', error);
+      setIsSubmitting(false);
+      setErrorMsg(`Error Login: ${error?.message || String(error)}`);
       setPin('');
-      return;
     }
-
-    showToast(`Berhasil masuk sebagai ${selectedRole}`, 'success');
-    router.replace(selectedRole === 'Admin' ? '/admin' : '/');
   };
 
   return (

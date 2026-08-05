@@ -36,52 +36,172 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   }
 
+  if (action === 'getParticipantScores') {
+    return getParticipantScores(e);
+  }
+
   return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'API Operational' }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
   try {
-    var data = JSON.parse(e.postData.contents);
+    var contents = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
+    var data = JSON.parse(contents);
+    var action = data.action || (e && e.parameter ? e.parameter.action : '');
     var result;
     
-    if (data.action === "login") {
+    if (action === "login") {
       result = login(data);
       return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "changePin") {
+    } else if (action === "changePin") {
       result = changePin(data);
       return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "saveVocal") {
+    } else if (action === "saveVocal") {
       result = saveVocal(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "savePerformance") {
+    } else if (action === "savePerformance") {
       result = savePerformance(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "saveStaging") {
+    } else if (action === "saveStaging") {
       result = saveStaging(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "toggleLock") {
+    } else if (action === "toggleLock") {
       result = toggleLockInSheet(data);
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', result: result })).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "saveGlobalLock") {
+    } else if (action === "saveGlobalLock") {
       PropertiesService.getScriptProperties().setProperty("isGlobalScoringLocked", String(data.isGlobalScoringLocked));
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', isGlobalScoringLocked: data.isGlobalScoringLocked })).setMimeType(ContentService.MimeType.JSON);
-    } else if (data.action === "setLockStatus") {
-      // ─── LOCK STATUS (Primary Source of Truth) ────────────────
+    } else if (action === "setLockStatus") {
       var lockResult = setLockStatus(
-        data.round || '',
-        data.participantName || '',
-        data.judge || '',
+        data.round || (e.parameter ? e.parameter.round : ''),
+        data.participantName || (e.parameter ? e.parameter.participantName : ''),
+        data.judge || (e.parameter ? e.parameter.judge : ''),
         data.locked === true || data.locked === 'true'
       );
       return ContentService.createTextOutput(JSON.stringify(lockResult)).setMimeType(ContentService.MimeType.JSON);
     } else {
-      throw new Error("Action tidak dikenali: " + data.action);
+      throw new Error("Action tidak dikenali: " + action);
     }
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: err.toString() }))
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', authenticated: false, message: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// ─── AUTHENTICATION SHEET & LOGIC ─────────────────────────────
+
+function getAuthSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('AUTH');
+  if (!sheet) {
+    sheet = ss.insertSheet('AUTH');
+    sheet.appendRow(['username', 'role', 'pin_hash', 'updated_at']);
+    sheet.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#0f172a').setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+
+    var now = new Date().toISOString();
+    // Default PIN 1234 -> 03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4
+    // Default Admin PIN 123456 -> 8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92
+    var hash1234 = '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4';
+    var hash123456 = '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92';
+
+    sheet.appendRow(['Kenji', 'vocal', hash1234, now]);
+    sheet.appendRow(['Ukey', 'performance', hash1234, now]);
+    sheet.appendRow(['Revan', 'staging', hash1234, now]);
+    sheet.appendRow(['Admin', 'admin', hash123456, now]);
+  }
+  return sheet;
+}
+
+function login(data) {
+  var username = String(data.username || '').trim();
+  var pinHash = String(data.pinHash || '').trim().toLowerCase();
+
+  if (!username || !pinHash) {
+    return {
+      status: 'error',
+      authenticated: false,
+      message: 'Username dan PIN harus diisi.'
+    };
+  }
+
+  var sheet = getAuthSheet();
+  var rows = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < rows.length; i++) {
+    var rUser = String(rows[i][0] || '').trim();
+    var rRole = String(rows[i][1] || '').trim();
+    var rHash = String(rows[i][2] || '').trim().toLowerCase();
+
+    if (rUser.toLowerCase() === username.toLowerCase()) {
+      if (rHash === pinHash) {
+        return {
+          status: 'success',
+          authenticated: true,
+          user: {
+            username: rUser,
+            role: rRole
+          }
+        };
+      } else {
+        return {
+          status: 'error',
+          authenticated: false,
+          message: 'PIN salah. Silakan coba lagi.'
+        };
+      }
+    }
+  }
+
+  return {
+    status: 'error',
+    authenticated: false,
+    message: 'Pengguna tidak ditemukan.'
+  };
+}
+
+function changePin(data) {
+  var username = String(data.username || '').trim();
+  var oldPinHash = String(data.oldPinHash || '').trim().toLowerCase();
+  var newPinHash = String(data.newPinHash || '').trim().toLowerCase();
+
+  if (!username || !oldPinHash || !newPinHash) {
+    return {
+      status: 'error',
+      message: 'Data perubahan PIN tidak lengkap.'
+    };
+  }
+
+  var sheet = getAuthSheet();
+  var rows = sheet.getDataRange().getValues();
+
+  for (var i = 1; i < rows.length; i++) {
+    var rUser = String(rows[i][0] || '').trim();
+    var rHash = String(rows[i][2] || '').trim().toLowerCase();
+
+    if (rUser.toLowerCase() === username.toLowerCase()) {
+      if (rHash === oldPinHash) {
+        var now = new Date().toISOString();
+        sheet.getRange(i + 1, 3).setValue(newPinHash);
+        sheet.getRange(i + 1, 4).setValue(now);
+        return {
+          status: 'success',
+          message: 'PIN berhasil diubah.'
+        };
+      } else {
+        return {
+          status: 'error',
+          message: 'PIN lama salah.'
+        };
+      }
+    }
+  }
+
+  return {
+    status: 'error',
+    message: 'Pengguna tidak ditemukan.'
+  };
 }
 
 // ─── TEXT NORMALIZER ──────────────────────────────────────────
@@ -924,20 +1044,4 @@ function getOrCreateLockSheet() {
   return sheet;
 }
 
-// Route actions
-function doGet(e) {
-  var action = e.parameter.action;
-  if (action === "getLockStatus") return getLockStatus(e);
-  if (action === "getAllLockStatus") return getAllLockStatus(e);
-  // existing GET handling (participants, submissions, etc.) should be placed before or after as needed
-  return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unknown action" })).setMimeType(ContentService.MimeType.JSON);
-}
 
-function doPost(e) {
-  var action = e.parameter.action;
-  if (action === "setLockStatus") return setLockStatus(e);
-  // existing POST handling (saveVocal, savePerformance, saveStaging) should be placed before or after as needed
-  return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unknown action" })).setMimeType(ContentService.MimeType.JSON);
-}
-
-// End of script
