@@ -99,6 +99,8 @@ export interface ParticipantFinalScore {
   revanscore: number | null;   // Staging subtotal (max 20), null = waiting
   finalScore: number | null;   // Sum, null if any judge is missing
   isComplete: boolean;         // true only when all 3 judges submitted
+  isTie?: boolean;             // true if all 4 scores match with another participant
+  tieNote?: string;            // Tie warning message ("PERLU KEPUTUSAN JURI")
 }
 
 // ============================================================
@@ -113,6 +115,8 @@ export interface Participant {
   category: string;
 }
 
+export type RoundType = 'penyisihan' | 'semifinal' | 'final';
+
 export interface KaraokeEvent {
   id: string;
   name: string;
@@ -123,6 +127,9 @@ export interface KaraokeEvent {
   currentRound: string;
   isLocked: boolean;
   participants: Participant[];
+  semifinalists?: Participant[]; // Custom/Confirmed Top 10 for Semifinal
+  finalists?: Participant[];     // Custom/Confirmed Top 5 for Final
+  roundStatus?: Record<string, 'pending' | 'active' | 'completed'>;
 }
 
 // ============================================================
@@ -162,6 +169,7 @@ export const DEFAULT_ROUNDS = [
   'Semifinal',
   'Grand Final',
 ] as const;
+
 
 export interface AwardBadge {
   label: string;

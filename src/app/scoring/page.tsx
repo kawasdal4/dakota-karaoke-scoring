@@ -511,6 +511,33 @@ export default function ScoringPage() {
   return (
     <div className="p-4 flex flex-col gap-5 pb-32">
 
+      {/* ── ACTIVE ROUND BANNER ────────────────────────────────── */}
+      {event && (
+        <div className="w-full p-3 rounded-2xl bg-slate-900/90 border border-purple-500/40 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase text-slate-400">BABAK:</span>
+            {event.currentRound.toLowerCase().includes('penyisihan') && (
+              <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-black">
+                🟠 BABAK PENYISIHAN
+              </span>
+            )}
+            {event.currentRound.toLowerCase().includes('semi') && (
+              <span className="px-3 py-1 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/40 text-xs font-black">
+                🟣 BABAK SEMIFINAL
+              </span>
+            )}
+            {event.currentRound.toLowerCase().includes('final') && !event.currentRound.toLowerCase().includes('semi') && (
+              <span className="px-3 py-1 rounded-xl bg-yellow-500/20 text-yellow-300 border border-yellow-500/40 text-xs font-black">
+                🟡 BABAK FINAL
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] font-bold text-slate-400">
+            {participants.length} Peserta Babak Ini
+          </span>
+        </div>
+      )}
+
       {/* ── HEADER SYNC BAR ─────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-black text-white flex items-center gap-2">
@@ -526,6 +553,7 @@ export default function ScoringPage() {
           <span>{isSyncing ? 'Syncing...' : 'Sync Sheets'}</span>
         </button>
       </div>
+
 
       {/* ── ADMIN ROLE SWITCHER (Only visible when logged in as Admin) ── */}
       {isAdminSession && (

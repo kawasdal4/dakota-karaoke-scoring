@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Settings, ArrowLeft, Plus, Lock, Unlock, Download, Upload,
-  ShieldAlert, Database, History, RefreshCw, Edit3, X, Save,
+  ShieldAlert, Database, History, RefreshCw, Edit3, X, Save, Trophy,
 } from 'lucide-react';
 import {
   getStoredEvents, getActiveEvent, saveEvents, setActiveEventId,
@@ -13,19 +13,21 @@ import {
   unlockVocal, unlockPerformance, unlockStaging,
   lockVocal, lockPerformance, lockStaging,
   saveVocalSubmission, savePerformanceSubmission, saveStagingSubmission,
-  exportBackupJSON, importBackupJSON,
+  exportBackupJSON, importBackupJSON, buildFinalScores, saveSemifinalists, saveFinalists,
 } from '@/lib/storage';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
-  detectDevice
+  detectDevice, sortScoresWithTieBreaker, downloadCSV,
 } from '@/lib/utils';
 import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets, saveGlobalLockToSheets } from '@/lib/google-sheets';
-import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission } from '@/types';
+import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission, Participant } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import StepperInput from '@/components/ui/stepper-input';
+import ConfirmationModal from '@/components/ui/modal';
 import { getAuthSession } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
+
 
 export default function AdminPage() {
   const { showToast } = useToast();
@@ -155,6 +157,132 @@ export default function AdminPage() {
     setEvents(updatedEvents);
     showToast(`Sesi babak aktif diubah ke: ${roundName}`, 'info');
   };
+
+  // ─── Round Transitions & Confirmations ────────────────────────
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const handleStartSemifinal = () => {
+    if (!activeEvent) return;
+    const parts = activeEvent.participants || [];
+    const penyisihanScores = buildFinalScores(activeEvent.id, 'Round Penyisihan', parts);
+    const sorted = sortScoresWithTieBreaker(penyisihanScores);
+
+    // Pick top 10 qualified participants
+    const top10Ids = new Set(sorted.slice(0, 10).map((s) => s.participantId));
+    const top10Parts = parts.filter((p) => top10Ids.has(p.id));
+    const finalTop10 = top10Parts.length > 0 ? top10Parts : parts.slice(0, 10);
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Lanjut ke Semifinal?',
+      message: '10 peserta dengan nilai tertinggi akan dipilih.\n\nNilai Penyisihan tetap tersimpan dan tidak dapat tercampur dengan nilai Semifinal.',
+      onConfirm: () => {
+        saveSemifinalists(activeEvent.id, finalTop10);
+        handleSwitchRound('Semifinal');
+        setConfirmModal(null);
+        showToast('🔥 Sesi Semifinal resmi dimulai! 10 Peserta terpilih.', 'success');
+      },
+    });
+  };
+
+  const handleStartFinal = () => {
+    if (!activeEvent) return;
+    const parts = activeEvent.participants || [];
+    const semiScores = buildFinalScores(activeEvent.id, 'Semifinal', parts);
+    const sorted = sortScoresWithTieBreaker(semiScores);
+
+    // Pick top 5 qualified finalis
+    const top5Ids = new Set(sorted.slice(0, 5).map((s) => s.participantId));
+    const top5Parts = parts.filter((p) => top5Ids.has(p.id));
+    const finalTop5 = top5Parts.length > 0 ? top5Parts : parts.slice(0, 5);
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Lanjut ke Final?',
+      message: '5 peserta dengan nilai tertinggi akan dipilih.\n\nNilai Semifinal tetap tersimpan dan tidak dapat tercampur dengan nilai Final.',
+      onConfirm: () => {
+        saveFinalists(activeEvent.id, finalTop5);
+        handleSwitchRound('Grand Final');
+        setConfirmModal(null);
+        showToast('👑 Sesi Final resmi dimulai! 5 Finalis terpilih.', 'success');
+      },
+    });
+  };
+
+  const handleFinalizeCompetition = () => {
+    if (!activeEvent) return;
+    setConfirmModal({
+      isOpen: true,
+      title: 'Finalkan Hasil Kejuaraan?',
+      message: 'Hasil babak Final akan diresmikan sebagai pemenang akhir Dakota Karaoke Cup.',
+      onConfirm: () => {
+        setConfirmModal(null);
+        showToast('🏆 Kejuaraan Resmi Dihasillkan!', 'success');
+      },
+    });
+  };
+
+  // ─── Per-Round CSV Exports ──────────────────────────────────
+  const handleExportRoundCSV = (targetRound: string) => {
+    if (!activeEvent) return;
+    const parts = activeEvent.participants || [];
+    const scores = buildFinalScores(activeEvent.id, targetRound, parts);
+    const sorted = sortScoresWithTieBreaker(scores);
+
+    const rows: (string | number)[][] = [
+      ['DOTA KARAOKE SCORING - EXPORT HASIL ' + targetRound.toUpperCase()],
+      ['Rank', 'No. Peserta', 'Nama Peserta', 'Kenji (Vocal)', 'Ukey (Performance)', 'Revan (Staging)', 'Total Nilai', 'Status'],
+    ];
+
+    sorted.forEach((s, idx) => {
+      rows.push([
+        s.isComplete ? idx + 1 : '-',
+        s.participantNo,
+        s.participantName,
+        s.kenjiscore ?? 0,
+        s.ukeyscore ?? 0,
+        s.revanscore ?? 0,
+        s.finalScore ?? 0,
+        s.isComplete ? (s.isTie ? 'PERLU KEPUTUSAN JURI' : 'Selesai') : 'Menunggu Juri',
+      ]);
+    });
+
+    downloadCSV(`hasil-${targetRound.toLowerCase().replace(/\s+/g, '-')}-${activeEvent.id}.csv`, rows);
+    showToast(`Export CSV ${targetRound} berhasil diunduh!`, 'success');
+  };
+
+  const handleExportFullCSV = () => {
+    if (!activeEvent) return;
+    const parts = activeEvent.participants || [];
+    const penyisihan = sortScoresWithTieBreaker(buildFinalScores(activeEvent.id, 'Round Penyisihan', parts));
+    const semifinal  = sortScoresWithTieBreaker(buildFinalScores(activeEvent.id, 'Semifinal', parts));
+    const final      = sortScoresWithTieBreaker(buildFinalScores(activeEvent.id, 'Grand Final', parts));
+
+    const rows: (string | number)[][] = [
+      ['DAKOTA KARAOKE CUP 2026 - REKAPITULASI PENUH KEJUARAAN'],
+      [],
+      ['=== BABAK PENYISIHAN ==='],
+      ['Rank', 'No. Peserta', 'Nama Peserta', 'Vocal', 'Perf', 'Staging', 'Total'],
+      ...penyisihan.map((s, idx) => [idx + 1, s.participantNo, s.participantName, s.kenjiscore ?? 0, s.ukeyscore ?? 0, s.revanscore ?? 0, s.finalScore ?? 0]),
+      [],
+      ['=== BABAK SEMIFINAL (TOP 10) ==='],
+      ['Rank', 'No. Peserta', 'Nama Peserta', 'Vocal', 'Perf', 'Staging', 'Total'],
+      ...semifinal.map((s, idx) => [idx + 1, s.participantNo, s.participantName, s.kenjiscore ?? 0, s.ukeyscore ?? 0, s.revanscore ?? 0, s.finalScore ?? 0]),
+      [],
+      ['=== BABAK GRAND FINAL (TOP 5) ==='],
+      ['Rank', 'No. Peserta', 'Nama Peserta', 'Vocal', 'Perf', 'Staging', 'Total'],
+      ...final.map((s, idx) => [idx + 1, s.participantNo, s.participantName, s.kenjiscore ?? 0, s.ukeyscore ?? 0, s.revanscore ?? 0, s.finalScore ?? 0]),
+    ];
+
+    downloadCSV(`rekap-kejuaraan-lengkap-${activeEvent.id}.csv`, rows);
+    showToast('Export Rekapitulasi Lengkap berhasil diunduh!', 'success');
+  };
+
 
 
   const handleCreateEvent = (e: React.FormEvent) => {
@@ -358,30 +486,63 @@ export default function AdminPage() {
 
         {/* Current Active Round Switcher */}
         {activeEvent && (
-          <div className="flex flex-col gap-2 p-3 rounded-2xl bg-slate-900/90 border border-purple-900/50 shadow-inner">
-            <span className="text-xs font-bold text-purple-300">Pilih Babak Aktif Penilaian:</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {['Round Penyisihan', 'Semifinal', 'Grand Final'].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => handleSwitchRound(r)}
-                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all border ${
-                    activeEvent.currentRound === r
-                      ? 'bg-purple-600 border-purple-400 text-white shadow-md'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {r === 'Round Penyisihan' ? 'Penyisihan' : r}
-                </button>
-              ))}
+          <div className="flex flex-col gap-3 p-3 rounded-2xl bg-slate-900/90 border border-purple-900/50 shadow-inner">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold text-purple-300">Pilih Babak Aktif Penilaian:</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {['Round Penyisihan', 'Semifinal', 'Grand Final'].map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => handleSwitchRound(r)}
+                    className={`py-2 px-1 text-xs font-bold rounded-xl transition-all border ${
+                      activeEvent.currentRound === r
+                        ? 'bg-purple-600 border-purple-400 text-white shadow-md'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {r === 'Round Penyisihan' ? 'Penyisihan' : r}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="text-[10px] text-slate-400 flex items-center justify-between mt-1 px-1">
-              <span>• Penyisihan: Semua Peserta</span>
-              <span>• Semifinal: Top 10</span>
-              <span>• Final: Top 5</span>
+
+            {/* CONTEXTUAL TRANSITION BUTTONS */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
+              <span className="text-[11px] font-extrabold text-slate-300 uppercase">AKSI TRANSISI BABAK</span>
+              
+              {activeEvent.currentRound.toLowerCase().includes('penyisihan') && (
+                <button
+                  onClick={handleStartSemifinal}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xs font-black shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>Pilih 10 Besar & Mulai Semifinal</span>
+                </button>
+              )}
+
+              {activeEvent.currentRound.toLowerCase().includes('semi') && (
+                <button
+                  onClick={handleStartFinal}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-yellow-600 text-white text-xs font-black shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  <Trophy className="w-4 h-4 text-amber-300" />
+                  <span>Pilih 5 Besar & Mulai Final</span>
+                </button>
+              )}
+
+              {activeEvent.currentRound.toLowerCase().includes('final') && !activeEvent.currentRound.toLowerCase().includes('semi') && (
+                <button
+                  onClick={handleFinalizeCompetition}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 text-slate-950 text-xs font-black shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 hover:brightness-110 active:scale-95 transition-all"
+                >
+                  <Trophy className="w-4 h-4 text-slate-950" />
+                  <span>Finalkan Hasil Kejuaraan</span>
+                </button>
+              )}
             </div>
           </div>
         )}
+
 
         {isCreatingEvent && (
           <form onSubmit={handleCreateEvent} className="p-3 rounded-2xl bg-slate-900/80 border border-purple-800/40 flex flex-col gap-3">
@@ -516,20 +677,56 @@ export default function AdminPage() {
         />
       </div>
 
-      {/* ── 4. BACKUP & RESTORE ──────────────────────────────────── */}
+      {/* ── 4. EXPORT HASIL PER BABAK & BACKUP ─────────────────────── */}
       <div className="glass-panel rounded-3xl p-5 border border-emerald-500/30 flex flex-col gap-4">
         <h2 className="text-sm font-extrabold text-white uppercase flex items-center gap-2 border-b border-emerald-900/40 pb-2">
           <Download className="w-4 h-4 text-emerald-400" />
-          <span>EMERGENCY BACKUP & RESTORE</span>
+          <span>EXPORT HASIL PENILAIAN & BACKUP</span>
         </h2>
 
-        <div className="grid grid-cols-2 gap-3">
+        {/* Per-Round CSV Exports */}
+        <div className="flex flex-col gap-2 p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+          <span className="text-xs font-bold text-emerald-300">Unduh Laporan Hasil (CSV):</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => handleExportRoundCSV('Round Penyisihan')}
+              className="py-2.5 px-3 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-amber-900/60 transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export Penyisihan</span>
+            </button>
+            <button
+              onClick={() => handleExportRoundCSV('Semifinal')}
+              className="py-2.5 px-3 rounded-xl bg-purple-950/60 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-purple-900/60 transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export Semifinal</span>
+            </button>
+            <button
+              onClick={() => handleExportRoundCSV('Grand Final')}
+              className="py-2.5 px-3 rounded-xl bg-yellow-950/60 border border-yellow-500/40 text-yellow-300 text-xs font-bold flex items-center justify-center gap-1.5 hover:bg-yellow-900/60 transition-all"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export Final</span>
+            </button>
+            <button
+              onClick={handleExportFullCSV}
+              className="py-2.5 px-3 rounded-xl bg-emerald-950/80 border border-emerald-400 text-emerald-300 text-xs font-black flex items-center justify-center gap-1.5 hover:bg-emerald-900/80 transition-all"
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-400" />
+              <span>Export Rekap Penuh</span>
+            </button>
+          </div>
+        </div>
+
+        {/* JSON Backup/Restore */}
+        <div className="grid grid-cols-2 gap-3 mt-1">
           <button
             onClick={handleExport}
             className="p-3 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex flex-col items-center gap-1.5 active:scale-95 transition-all"
           >
             <Download className="w-5 h-5 text-emerald-400" />
-            <span>Export JSON</span>
+            <span>Export Backup JSON</span>
           </button>
           <button
             onClick={() => setShowImportBox((p) => !p)}
@@ -585,6 +782,20 @@ export default function AdminPage() {
           ))}
         </div>
       </div>
+
+      {/* ── CONFIRMATION MODAL TRANSITION BABAK ─────────────────── */}
+      {confirmModal && (
+        <ConfirmationModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          confirmText="Ya, Lanjutkan"
+          cancelText="Batal"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
+      )}
+
 
       {/* ── ADMIN DIRECT EDIT MODAL ─────────────────────────── */}
       {editingSub && (

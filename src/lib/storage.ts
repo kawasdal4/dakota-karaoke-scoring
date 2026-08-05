@@ -9,6 +9,8 @@ import {
   ParticipantFinalScore,
   Participant,
 } from '@/types';
+import { sortScoresWithTieBreaker } from '@/lib/utils';
+
 
 export const INITIAL_EVENT: KaraokeEvent = {
   id: 'evt-dakota-2026',
@@ -387,44 +389,57 @@ export function getQualifiedParticipants(
   allParticipants: Participant[]
 ): Participant[] {
   if (!allParticipants || allParticipants.length === 0) return [];
-  if (round === 'Round Penyisihan' || round === 'Penyisihan' || !round) {
+  const normalizedRound = (round || '').toLowerCase().trim();
+
+  if (normalizedRound.includes('penyisihan') || normalizedRound === 'round penyisihan' || !round) {
     return allParticipants;
   }
 
-  if (round === 'Semifinal') {
-    // Top 10 participants from Round Penyisihan
-    const penyisihanScores = buildFinalScores(eventId, 'Round Penyisihan', allParticipants);
-    penyisihanScores.sort((a, b) => {
-      const sumA = (a.kenjiscore ?? 0) + (a.ukeyscore ?? 0) + (a.revanscore ?? 0);
-      const sumB = (b.kenjiscore ?? 0) + (b.ukeyscore ?? 0) + (b.revanscore ?? 0);
-      if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
-      if (sumA !== sumB) return sumB - sumA;
-      return a.participantNo - b.participantNo;
-    });
+  const activeEvent = getActiveEvent();
 
-    const qualifiedIds = new Set(penyisihanScores.slice(0, 10).map((s) => s.participantId));
+  if (normalizedRound.includes('semi')) {
+    // If admin explicitly set custom semifinalists, use them!
+    if (activeEvent && Array.isArray(activeEvent.semifinalists) && activeEvent.semifinalists.length > 0) {
+      return activeEvent.semifinalists;
+    }
+    // Otherwise, auto-pick Top 10 from Round Penyisihan using tie breaker
+    const penyisihanScores = buildFinalScores(eventId, 'Round Penyisihan', allParticipants);
+    const sorted = sortScoresWithTieBreaker(penyisihanScores);
+
+    const qualifiedIds = new Set(sorted.slice(0, 10).map((s) => s.participantId));
     const result = allParticipants.filter((p) => qualifiedIds.has(p.id));
-    return result.length > 0 ? result : allParticipants;
+    return result.length > 0 ? result : allParticipants.slice(0, 10);
   }
 
-  if (round === 'Grand Final') {
-    // Top 5 participants from Semifinal
+  if (normalizedRound.includes('final')) {
+    // If admin explicitly set custom finalists, use them!
+    if (activeEvent && Array.isArray(activeEvent.finalists) && activeEvent.finalists.length > 0) {
+      return activeEvent.finalists;
+    }
+    // Otherwise, auto-pick Top 5 from Semifinal using tie breaker
     const semifinalScores = buildFinalScores(eventId, 'Semifinal', allParticipants);
-    semifinalScores.sort((a, b) => {
-      const sumA = (a.kenjiscore ?? 0) + (a.ukeyscore ?? 0) + (a.revanscore ?? 0);
-      const sumB = (b.kenjiscore ?? 0) + (b.ukeyscore ?? 0) + (b.revanscore ?? 0);
-      if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
-      if (sumA !== sumB) return sumB - sumA;
-      return a.participantNo - b.participantNo;
-    });
+    const sorted = sortScoresWithTieBreaker(semifinalScores);
 
-    const qualifiedIds = new Set(semifinalScores.slice(0, 5).map((s) => s.participantId));
+    const qualifiedIds = new Set(sorted.slice(0, 5).map((s) => s.participantId));
     const result = allParticipants.filter((p) => qualifiedIds.has(p.id));
-    return result.length > 0 ? result : allParticipants;
+    return result.length > 0 ? result : allParticipants.slice(0, 5);
   }
 
   return allParticipants;
 }
+
+export function saveSemifinalists(eventId: string, semifinalists: Participant[]): void {
+  const events = getStoredEvents();
+  const updated = events.map((e) => (e.id === eventId ? { ...e, semifinalists } : e));
+  saveEvents(updated);
+}
+
+export function saveFinalists(eventId: string, finalists: Participant[]): void {
+  const events = getStoredEvents();
+  const updated = events.map((e) => (e.id === eventId ? { ...e, finalists } : e));
+  saveEvents(updated);
+}
+
 
 
 // ─── Drafts ──────────────────────────────────────────────────

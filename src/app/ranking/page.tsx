@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+
 import Link from 'next/link';
 import {
-  Trophy, RefreshCw, ArrowLeft, Clock, CheckCircle2, AlertCircle,
+  Trophy, RefreshCw, ArrowLeft, Clock, CheckCircle2, AlertTriangle, Medal,
 } from 'lucide-react';
 import { getActiveEvent, buildFinalScores, getStoredJudge, getQualifiedParticipants } from '@/lib/storage';
 import { ParticipantFinalScore, KaraokeEvent, DEFAULT_ROUNDS, GRAND_FINAL_AWARDS } from '@/types';
+import { sortScoresWithTieBreaker } from '@/lib/utils';
 import { useToast } from '@/components/ui/toast';
 import { fetchParticipants, fetchSubmissionsFromSheets } from '@/lib/google-sheets';
 import { getAuthSession } from '@/lib/auth';
@@ -20,7 +22,6 @@ export default function RankingPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const router = useRouter();
-
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const load = async (targetRound?: string) => {
@@ -48,15 +49,10 @@ export default function RankingPage() {
       // Get qualified participants for the selected round
       const qualified = getQualifiedParticipants(evt.id, currentSelectedRound, mappedParts);
 
-      const scores = buildFinalScores(evt.id, currentSelectedRound, qualified);
-      // Sort: complete entries by finalScore desc, then incomplete by name
-      scores.sort((a, b) => {
-        if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
-        if (a.isComplete) return -1;
-        if (b.isComplete) return 1;
-        return a.participantNo - b.participantNo;
-      });
-      setRows(scores);
+      const rawScores = buildFinalScores(evt.id, currentSelectedRound, qualified);
+      // Sort using 4-tier tie breaker rule (Total > Vocal > Perf > Staging)
+      const sortedScores = sortScoresWithTieBreaker(rawScores);
+      setRows(sortedScores);
     } catch (err: any) {
       setErrorMsg(err.message || 'Gagal memuat peserta');
       showToast(err.message || 'Gagal memuat peserta', 'error');
@@ -93,7 +89,9 @@ export default function RankingPage() {
     showToast('Data ranking diperbarui.', 'info');
   };
 
-  const judge = getStoredJudge();
+  const isPenyisihanRound = activeRound.toLowerCase().includes('penyisihan');
+  const isSemifinalRound  = activeRound.toLowerCase().includes('semi');
+  const isFinalRound      = activeRound.toLowerCase().includes('final') && !isSemifinalRound;
 
   return (
     <div className="p-4 flex flex-col gap-5 pb-24">
@@ -138,17 +136,66 @@ export default function RankingPage() {
         })}
       </div>
 
-      {/* Round Qualification Banner */}
-      <div className="px-3 py-2 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between text-xs">
-        <span className="text-slate-400 font-medium">
-          {activeRound === 'Round Penyisihan' && '🔥 Babak Penyisihan (Top 10 Lolos Semifinal)'}
-          {activeRound === 'Semifinal' && '⚡ Babak Semifinal (Top 10 Peserta • Top 5 Lolos Grand Final)'}
-          {activeRound === 'Grand Final' && '👑 Babak Grand Final (Top 5 Finalis)'}
+      {/* Round Banner Description */}
+      <div className="px-3 py-2.5 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs">
+        <span className="text-slate-300 font-semibold">
+          {isPenyisihanRound && '🟠 BABAK PENYISIHAN (Top 10 Lolos Semifinal)'}
+          {isSemifinalRound  && '🟣 BABAK SEMIFINAL (10 Semifinalists • Top 5 Lolos Final)'}
+          {isFinalRound      && '🟡 BABAK FINAL (5 Finalis • Penentu Juara)'}
         </span>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+        <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
           {rows.length} Peserta
         </span>
       </div>
+
+      {/* 🏆 LARGE WINNER CARDS FOR GRAND FINAL */}
+      {isFinalRound && (
+        <div className="flex flex-col gap-3 my-1">
+          <h3 className="text-xs font-extrabold text-amber-400 uppercase tracking-widest text-center flex items-center justify-center gap-1.5">
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>HASIL AKHIR KEJUARAAN</span>
+          </h3>
+          <div className="grid grid-cols-1 gap-2.5">
+            {rows.slice(0, 5).map((row, idx) => {
+              const award = GRAND_FINAL_AWARDS[idx + 1];
+              if (!award) return null;
+              return (
+                <div
+                  key={row.participantId}
+                  className={`p-4 rounded-3xl border flex items-center justify-between shadow-xl transition-all ${award.badgeBg} ${award.badgeBorder}`}
+                >
+                  <div className="flex items-center gap-3.5">
+                    <span className="text-3xl">{award.icon}</span>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-black px-2 py-0.5 rounded-lg border ${award.badgeBg} ${award.badgeText} ${award.badgeBorder}`}>
+                          {award.label}
+                        </span>
+                        {row.isTie && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                            ⚠️ PERLU KEPUTUSAN JURI
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-base font-black text-white mt-0.5">
+                        #{row.participantNo} {row.participantName}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="text-2xl font-black text-white">
+                      {row.isComplete ? row.finalScore : '—'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      {row.isComplete ? 'Point Total' : 'Menunggu Juri'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Legend */}
       <div className="flex items-center gap-3 text-[10px] font-semibold text-slate-400 px-1">
@@ -176,10 +223,13 @@ export default function RankingPage() {
       <div className="flex flex-col gap-2">
         {rows.map((row, idx) => {
           const rank = row.isComplete ? idx + 1 : null;
-          const award = (activeRound === 'Grand Final' && rank && GRAND_FINAL_AWARDS[rank]) ? GRAND_FINAL_AWARDS[rank] : null;
+          const award = (isFinalRound && rank && GRAND_FINAL_AWARDS[rank]) ? GRAND_FINAL_AWARDS[rank] : null;
 
-          const isQualifyingSemi = activeRound === 'Round Penyisihan' && rank !== null && rank <= 10;
-          const isQualifyingFinal = activeRound === 'Semifinal' && rank !== null && rank <= 5;
+          const isQualifyingSemi = isPenyisihanRound && rank !== null && rank <= 10;
+          const isNotQualifyingSemi = isPenyisihanRound && rank !== null && rank > 10;
+
+          const isQualifyingFinal = isSemifinalRound && rank !== null && rank <= 5;
+          const isNotQualifyingFinal = isSemifinalRound && rank !== null && rank > 5;
 
           return (
             <div
@@ -205,25 +255,45 @@ export default function RankingPage() {
                 {award ? award.icon : (rank ?? '—')}
               </div>
 
-              {/* Name & Qualification / Award Badge */}
+              {/* Name & Qualification / Award Badges */}
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-xs font-bold text-white truncate">
                     #{row.participantNo} {row.participantName}
                   </span>
+
+                  {/* Badges per requirements */}
+                  {isQualifyingSemi && (
+                    <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      🏆 LOLOS SEMIFINAL
+                    </span>
+                  )}
+                  {isNotQualifyingSemi && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">
+                      TIDAK LOLOS
+                    </span>
+                  )}
+
+                  {isQualifyingFinal && (
+                    <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                      🏆 LOLOS FINAL
+                    </span>
+                  )}
+                  {isNotQualifyingFinal && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">
+                      TIDAK LOLOS
+                    </span>
+                  )}
+
                   {award && (
-                    <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-md ${award.badgeBg} ${award.badgeText} border ${award.badgeBorder}`}>
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${award.badgeBg} ${award.badgeText} border ${award.badgeBorder}`}>
                       {award.shortLabel}
                     </span>
                   )}
-                  {isQualifyingSemi && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Lolos Semi Final
-                    </span>
-                  )}
-                  {isQualifyingFinal && (
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                      Lolos Final
+
+                  {row.isTie && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                      PERLU KEPUTUSAN JURI
                     </span>
                   )}
                 </div>
@@ -254,6 +324,7 @@ export default function RankingPage() {
     </div>
   );
 }
+
 
 
 // ─── Sub-component: Single score cell ───────────────────────

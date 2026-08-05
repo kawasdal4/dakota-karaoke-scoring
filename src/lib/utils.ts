@@ -131,3 +131,80 @@ export function detectDevice(): string {
   if (/Mac/i.test(ua)) return 'Mac Desktop';
   return 'Mobile Web Browser';
 }
+
+// ============================================================
+// ROUND NORMALIZATION & TIE-BREAKER ALGORITHM
+// ============================================================
+
+export function normalizeRoundName(round: string): 'penyisihan' | 'semifinal' | 'final' {
+  const r = (round || '').toLowerCase().trim();
+  if (r.includes('semi')) return 'semifinal';
+  if (r.includes('final') && !r.includes('semi')) return 'final';
+  return 'penyisihan';
+}
+
+export function sortScoresWithTieBreaker(scores: any[]): any[] {
+  const sorted = [...scores].sort((a, b) => {
+    if (a.isComplete && !b.isComplete) return -1;
+    if (!a.isComplete && b.isComplete) return 1;
+
+    const totalA = a.finalScore ?? ((a.kenjiscore ?? 0) + (a.ukeyscore ?? 0) + (a.revanscore ?? 0));
+    const totalB = b.finalScore ?? ((b.kenjiscore ?? 0) + (b.ukeyscore ?? 0) + (b.revanscore ?? 0));
+    if (totalA !== totalB) return totalB - totalA;
+
+    const vocalA = a.kenjiscore ?? 0;
+    const vocalB = b.kenjiscore ?? 0;
+    if (vocalA !== vocalB) return vocalB - vocalA;
+
+    const perfA = a.ukeyscore ?? 0;
+    const perfB = b.ukeyscore ?? 0;
+    if (perfA !== perfB) return perfB - perfA;
+
+    const stageA = a.revanscore ?? 0;
+    const stageB = b.revanscore ?? 0;
+    if (stageA !== stageB) return stageB - stageA;
+
+    return a.participantNo - b.participantNo;
+  });
+
+  for (let i = 0; i < sorted.length; i++) {
+    const curr = sorted[i];
+    if (!curr.isComplete) continue;
+
+    for (let j = i + 1; j < sorted.length; j++) {
+      const next = sorted[j];
+      if (!next.isComplete) continue;
+
+      const sameTotal = (curr.finalScore ?? 0) === (next.finalScore ?? 0);
+      const sameVocal = (curr.kenjiscore ?? 0) === (next.kenjiscore ?? 0);
+      const samePerf  = (curr.ukeyscore ?? 0)  === (next.ukeyscore ?? 0);
+      const sameStage = (curr.revanscore ?? 0)  === (next.revanscore ?? 0);
+
+      if (sameTotal && sameVocal && samePerf && sameStage && (curr.finalScore ?? 0) > 0) {
+        curr.isTie = true;
+        curr.tieNote = 'PERLU KEPUTUSAN JURI';
+        next.isTie = true;
+        next.tieNote = 'PERLU KEPUTUSAN JURI';
+      }
+    }
+  }
+
+  return sorted;
+}
+
+// ============================================================
+// CSV EXPORT HELPER
+// ============================================================
+
+export function downloadCSV(filename: string, rows: (string | number)[][]): void {
+  if (typeof window === 'undefined') return;
+  const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.map((val) => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
