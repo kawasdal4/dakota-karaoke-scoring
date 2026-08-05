@@ -6,19 +6,36 @@
 
 function doGet(e) {
   var action = e.parameter ? e.parameter.action : '';
-  
+
   if (action === 'getParticipants') {
     var participants = readParticipantsFromSheet();
     return ContentService.createTextOutput(JSON.stringify({ status: 'success', participants: participants }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  
+
   if (action === 'getSubmissions') {
     var submissions = readSubmissionsFromSheet();
     return ContentService.createTextOutput(JSON.stringify({ status: 'success', ...submissions }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-  
+
+  // ─── LOCK STATUS GET ─────────────────────────────────────────
+  if (action === 'getLockStatus') {
+    var round = e.parameter.round || '';
+    var participantName = e.parameter.participantName || '';
+    var judge = e.parameter.judge || '';
+    var result = getLockStatus(round, participantName, judge);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  if (action === 'getAllLockStatus') {
+    var filterRound = e.parameter.round || '';
+    var result = getAllLockStatus(filterRound);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
   return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'API Operational' }))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -49,6 +66,15 @@ function doPost(e) {
     } else if (data.action === "saveGlobalLock") {
       PropertiesService.getScriptProperties().setProperty("isGlobalScoringLocked", String(data.isGlobalScoringLocked));
       return ContentService.createTextOutput(JSON.stringify({ status: 'success', isGlobalScoringLocked: data.isGlobalScoringLocked })).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "setLockStatus") {
+      // ─── LOCK STATUS (Primary Source of Truth) ────────────────
+      var lockResult = setLockStatus(
+        data.round || '',
+        data.participantName || '',
+        data.judge || '',
+        data.locked === true || data.locked === 'true'
+      );
+      return ContentService.createTextOutput(JSON.stringify(lockResult)).setMimeType(ContentService.MimeType.JSON);
     } else {
       throw new Error("Action tidak dikenali: " + data.action);
     }
@@ -56,6 +82,12 @@ function doPost(e) {
     return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: err.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// ─── TEXT NORMALIZER ──────────────────────────────────────────
+// Used for case-insensitive, emoji-safe matching in LOCK_STATUS
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 // ─── ROLE HELPER ──────────────────────────────────────────────
@@ -66,6 +98,165 @@ function normalizeRole(role) {
   if (r === "ukey" || r === "performance") return "performance";
   if (r === "revan" || r === "staging") return "staging";
   return r;
+}
+
+// Judge name → display name (always Kenji/Ukey/Revan)
+function normalizeJudgeName(judge) {
+  var j = String(judge || '').trim().toLowerCase();
+  if (j === 'kenji' || j === 'vocal') return 'Kenji';
+  if (j === 'ukey' || j === 'performance') return 'Ukey';
+  if (j === 'revan' || j === 'staging') return 'Revan';
+  return judge;
+}
+
+// ─── LOCK_STATUS SHEET ────────────────────────────────────────
+// Primary source of truth for per-round / per-participant / per-judge lock
+
+function getLockStatusSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('LOCK_STATUS');
+  if (!sheet) {
+    sheet = ss.insertSheet('LOCK_STATUS');
+    sheet.appendRow(['round', 'participant_name', 'judge', 'locked', 'updated_at']);
+    sheet.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0f172a').setFontColor('#ffffff');
+  }
+  return sheet;
+}
+
+/**
+ * getLockStatus – returns {status, locked, round, participantName, judge, updatedAt}
+ * Default: locked = false (open) if row does not exist.
+ */
+function getLockStatus(round, participantName, judge) {
+  var normRound = normalizeText(round);
+  var normName  = normalizeText(participantName);
+  var normJudge = normalizeText(normalizeJudgeName(judge));
+
+  try {
+    var sheet = getLockStatusSheet();
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      var rRound = normalizeText(rows[i][0]);
+      var rName  = normalizeText(rows[i][1]);
+      var rJudge = normalizeText(rows[i][2]);
+      if (rRound === normRound && rName === normName && rJudge === normJudge) {
+        var lockedVal = rows[i][3];
+        // Coerce to boolean — handles TRUE/FALSE cell values, strings, 0/1
+        var locked = (lockedVal === true || lockedVal === 'true' || lockedVal === 1);
+        return {
+          status: 'success',
+          locked: locked,
+          round: rows[i][0],
+          participantName: rows[i][1],
+          judge: rows[i][2],
+          updatedAt: rows[i][4] || ''
+        };
+      }
+    }
+    // Row not found → default open
+    return { status: 'success', locked: false, source: 'default', round: round, participantName: participantName, judge: judge };
+  } catch (err) {
+    Logger.log('getLockStatus error: ' + err);
+    return { status: 'error', locked: false, message: err.toString() };
+  }
+}
+
+/**
+ * setLockStatus – upsert row in LOCK_STATUS sheet.
+ * round / participantName / judge: normalized for matching but stored in original form.
+ */
+function setLockStatus(round, participantName, judge, locked) {
+  var normRound = normalizeText(round);
+  var normName  = normalizeText(participantName);
+  var displayJudge = normalizeJudgeName(judge);
+  var normJudge = normalizeText(displayJudge);
+  var lockedBool = (locked === true || locked === 'true');
+  var now = new Date().toISOString();
+
+  try {
+    var sheet = getLockStatusSheet();
+    var rows = sheet.getDataRange().getValues();
+
+    for (var i = 1; i < rows.length; i++) {
+      var rRound = normalizeText(rows[i][0]);
+      var rName  = normalizeText(rows[i][1]);
+      var rJudge = normalizeText(rows[i][2]);
+      if (rRound === normRound && rName === normName && rJudge === normJudge) {
+        var rowIndex = i + 1;
+        sheet.getRange(rowIndex, 4).setValue(lockedBool);
+        sheet.getRange(rowIndex, 5).setValue(now);
+        return {
+          status: 'success',
+          locked: lockedBool,
+          round: round,
+          participantName: participantName,
+          judge: displayJudge,
+          updatedAt: now
+        };
+      }
+    }
+
+    // Insert new row
+    sheet.appendRow([round, participantName, displayJudge, lockedBool, now]);
+    return {
+      status: 'success',
+      locked: lockedBool,
+      round: round,
+      participantName: participantName,
+      judge: displayJudge,
+      updatedAt: now
+    };
+  } catch (err) {
+    Logger.log('setLockStatus error: ' + err);
+    return { status: 'error', message: err.toString() };
+  }
+}
+
+/**
+ * getAllLockStatus – returns all rows (optionally filtered by round)
+ */
+function getAllLockStatus(filterRound) {
+  var normFilter = normalizeText(filterRound || '');
+  try {
+    var sheet = getLockStatusSheet();
+    var rows = sheet.getDataRange().getValues();
+    var result = [];
+    for (var i = 1; i < rows.length; i++) {
+      var rowRound = rows[i][0];
+      if (normFilter && normalizeText(rowRound) !== normFilter) continue;
+      var lockedVal = rows[i][3];
+      var locked = (lockedVal === true || lockedVal === 'true' || lockedVal === 1);
+      result.push({
+        round: rowRound,
+        participantName: rows[i][1],
+        judge: rows[i][2],
+        locked: locked,
+        updatedAt: rows[i][4] || ''
+      });
+    }
+    return { status: 'success', locks: result };
+  } catch (err) {
+    return { status: 'error', message: err.toString(), locks: [] };
+  }
+}
+
+/**
+ * checkLockBeforeSave – called inside saveVocal/savePerformance/saveStaging.
+ * Returns {blocked: true, message: ...} if saving should be denied.
+ */
+function checkLockBeforeSave(data, judgeName) {
+  var round = normalizeText(data.round || 'penyisihan');
+  var participantName = data.participantName || '';
+  var status = getLockStatus(round, participantName, judgeName);
+  if (status.locked === true) {
+    return {
+      blocked: true,
+      status: 'error',
+      code: 'SCORING_LOCKED',
+      message: 'Penilaian sedang dikunci oleh Admin.'
+    };
+  }
+  return { blocked: false };
 }
 
 // ─── AUTHENTICATION (TERPUSAT) ────────────────────────────────
@@ -498,6 +689,12 @@ function getScoringSheet() {
 }
 
 function saveVocal(data) {
+  // ─── BACKEND LOCK VALIDATION (LOCK_STATUS is primary source) ─
+  var lockCheck = checkLockBeforeSave(data, 'Kenji');
+  if (lockCheck.blocked) {
+    return lockCheck; // {status:'error', code:'SCORING_LOCKED', message:...}
+  }
+
   // Try to write to main scoring sheet (non-critical — may fail if wrong sheet is active)
   try {
     var sheet = getScoringSheet();
@@ -511,7 +708,7 @@ function saveVocal(data) {
   } catch (sheetErr) {
     Logger.log("saveVocal: main sheet write failed (non-fatal): " + sheetErr.toString());
   }
-  
+
   // CRITICAL: Always save to SUBMISSIONS sheet regardless of main sheet status
   var vocalScores = {
     accuracy: Number(data.accuracy) || 0,
@@ -526,6 +723,10 @@ function saveVocal(data) {
 }
 
 function savePerformance(data) {
+  // ─── BACKEND LOCK VALIDATION ─────────────────────────────────
+  var lockCheck = checkLockBeforeSave(data, 'Ukey');
+  if (lockCheck.blocked) return lockCheck;
+
   // Try to write to main scoring sheet (non-critical)
   try {
     var sheet = getScoringSheet();
@@ -539,7 +740,7 @@ function savePerformance(data) {
   } catch (sheetErr) {
     Logger.log("savePerformance: main sheet write failed (non-fatal): " + sheetErr.toString());
   }
-  
+
   // CRITICAL: Always save to SUBMISSIONS sheet
   var perfScores = {
     expression: Number(data.perfExpression) || 0,
@@ -554,6 +755,10 @@ function savePerformance(data) {
 }
 
 function saveStaging(data) {
+  // ─── BACKEND LOCK VALIDATION ─────────────────────────────────
+  var lockCheck = checkLockBeforeSave(data, 'Revan');
+  if (lockCheck.blocked) return lockCheck;
+
   // Try to write to main scoring sheet (non-critical)
   try {
     var sheet = getScoringSheet();
@@ -566,7 +771,7 @@ function saveStaging(data) {
   } catch (sheetErr) {
     Logger.log("saveStaging: main sheet write failed (non-fatal): " + sheetErr.toString());
   }
-  
+
   // CRITICAL: Always save to SUBMISSIONS sheet
   var stagingScores = {
     interaction: Number(data.interaction) || 0,
@@ -599,3 +804,98 @@ function readParticipantsFromSheet() {
 
   return participants;
 }
+// ─── LOCK_STATUS API ───────────────────────────────────────
+// Sheet "LOCK_STATUS" stores lock state per round, participant, and judge.
+// Columns: round, participantName, judge, locked (TRUE/FALSE), updated_at
+
+function getLockStatus(e) {
+  // Expected query parameters: round, participantName, judge
+  var round = e.parameter.round;
+  var participantName = e.parameter.participantName;
+  var judge = e.parameter.judge;
+  if (!round || !participantName || !judge) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Missing parameters" })).setMimeType(ContentService.MimeType.JSON);
+  }
+  var sheet = getOrCreateLockSheet();
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === round && String(data[i][1]) === participantName && String(data[i][2]) === judge) {
+      var locked = data[i][3] === true || String(data[i][3]).toLowerCase() === "true";
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", locked: locked, updatedAt: data[i][4] })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  // Not found – default unlocked
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", locked: false })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function setLockStatus(e) {
+  // Expected POST body JSON: { round, participantName, judge, locked }
+  var payload = JSON.parse(e.postData.contents || "{}");
+  var round = payload.round;
+  var participantName = payload.participantName;
+  var judge = payload.judge;
+  var locked = payload.locked;
+  if (round == null || participantName == null || judge == null || locked == null) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Missing fields" })).setMimeType(ContentService.MimeType.JSON);
+  }
+  var sheet = getOrCreateLockSheet();
+  var data = sheet.getDataRange().getValues();
+  var now = new Date();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === round && String(data[i][1]) === participantName && String(data[i][2]) === judge) {
+      sheet.getRange(i + 1, 4).setValue(locked);
+      sheet.getRange(i + 1, 5).setValue(now);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+  // Append new row
+  sheet.appendRow([round, participantName, judge, locked, now]);
+  return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function getAllLockStatus(e) {
+  var sheet = getOrCreateLockSheet();
+  var data = sheet.getDataRange().getValues();
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    rows.push({
+      round: data[i][0],
+      participantName: data[i][1],
+      judge: data[i][2],
+      locked: data[i][3] === true || String(data[i][3]).toLowerCase() === "true",
+      updatedAt: data[i][4]
+    });
+  }
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", lockStatuses: rows })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function getOrCreateLockSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("LOCK_STATUS");
+  if (!sheet) {
+    sheet = ss.insertSheet("LOCK_STATUS");
+    // Header row
+    sheet.appendRow(["round", "participantName", "judge", "locked", "updated_at"]);
+    sheet.setFrozenRows(1);
+    // Optional: protect headers
+  }
+  return sheet;
+}
+
+// Route actions
+function doGet(e) {
+  var action = e.parameter.action;
+  if (action === "getLockStatus") return getLockStatus(e);
+  if (action === "getAllLockStatus") return getAllLockStatus(e);
+  // existing GET handling (participants, submissions, etc.) should be placed before or after as needed
+  return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unknown action" })).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var action = e.parameter.action;
+  if (action === "setLockStatus") return setLockStatus(e);
+  // existing POST handling (saveVocal, savePerformance, saveStaging) should be placed before or after as needed
+  return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unknown action" })).setMimeType(ContentService.MimeType.JSON);
+}
+
+// End of script

@@ -20,7 +20,7 @@ import {
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
   detectDevice, sortScoresWithTieBreaker, downloadCSV,
 } from '@/lib/utils';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets, saveGlobalLockToSheets } from '@/lib/google-sheets';
+import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets, saveGlobalLockToSheets, setLockStatusToSheets } from '@/lib/google-sheets';
 import { KaraokeEvent, AdminSettings, AuditLogEntry, VocalSubmission, PerformanceSubmission, StagingSubmission, Participant } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import StepperInput from '@/components/ui/stepper-input';
@@ -345,26 +345,44 @@ export default function AdminPage() {
     }
   };
 
-  // Toggle lock individual submission
-  const handleToggleLock = (judge: 'Kenji' | 'Ukey' | 'Revan', participantId: string, isCurrentlyLocked: boolean) => {
+  // Toggle lock individual submission — LOCK_STATUS is primary source of truth
+  const handleToggleLock = async (judge: 'Kenji' | 'Ukey' | 'Revan', participantId: string, isCurrentlyLocked: boolean) => {
     if (!activeEvent) return;
     const round = activeEvent.currentRound;
     const pNo = parseInt(participantId.replace('p', '')) || 0;
     const newLockState = !isCurrentlyLocked;
 
-    if (isCurrentlyLocked) {
-      if (judge === 'Kenji') unlockVocal(activeEvent.id, round, participantId);
-      else if (judge === 'Ukey') unlockPerformance(activeEvent.id, round, participantId);
-      else if (judge === 'Revan') unlockStaging(activeEvent.id, round, participantId);
-      showToast(`Kunci nilai ${judge} DIBUKA. Juri/Admin sekarang bisa edit.`, 'info');
+    // Find participant name for LOCK_STATUS key
+    const prt = activeEvent.participants?.find((p) => p.id === participantId);
+    const participantName = prt?.name || participantId;
+
+    // 1. Set LOCK_STATUS in Google Sheets (primary source of truth)
+    const lockResult = await setLockStatusToSheets(round, participantName, judge, newLockState);
+
+    if (lockResult.status === 'success') {
+      showToast(
+        newLockState
+          ? `🔒 Nilai ${judge} DIKUNCI. Akun juri akan terkunci otomatis dalam 2 detik.`
+          : `🔓 Nilai ${judge} DIBUKA. Status sudah dikirim ke akun juri.`,
+        'info'
+      );
     } else {
+      showToast(`Gagal mengubah lock status ${judge}. Cek koneksi GAS.`, 'error');
+    }
+
+    // 2. Also update legacy localStorage (backward compat)
+    if (newLockState) {
       if (judge === 'Kenji') lockVocal(activeEvent.id, round, participantId);
       else if (judge === 'Ukey') lockPerformance(activeEvent.id, round, participantId);
       else if (judge === 'Revan') lockStaging(activeEvent.id, round, participantId);
-      showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI.`, 'info');
+    } else {
+      if (judge === 'Kenji') unlockVocal(activeEvent.id, round, participantId);
+      else if (judge === 'Ukey') unlockPerformance(activeEvent.id, round, participantId);
+      else if (judge === 'Revan') unlockStaging(activeEvent.id, round, participantId);
     }
+
+    // 3. Keep legacy SUBMISSIONS.isLocked for backward compat
     toggleLockToSheets(activeEvent.id, round, judge, pNo, newLockState);
-    // Use loadLocal() to avoid re-fetching from Sheets (which may not have processed the lock yet)
     loadLocal();
   };
 

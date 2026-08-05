@@ -102,12 +102,12 @@ export async function changePinInSheets(
 
 // ─── Kenji: Write Vocal cells ONLY ──────────────────────────
 
-export async function submitVocalToSheets(sub: VocalSubmission): Promise<void> {
+export async function submitVocalToSheets(sub: VocalSubmission): Promise<{status: string; message?: string}> {
   const url = getScriptUrl();
-  if (!url) return;
+  if (!url) return {status: 'error', message: 'Missing script URL'};
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
@@ -129,19 +129,30 @@ export async function submitVocalToSheets(sub: VocalSubmission): Promise<void> {
         notes:      sub.notes ?? '',
       }),
     });
+    if (!response.ok) {
+      let errMsg = `HTTP ${response.status}`;
+      try { const data = await response.json(); if (data && data.message) errMsg = data.message; } catch (_) {}
+      return {status: 'error', message: errMsg};
+    }
+    const result = await response.json();
+    if (result && result.status === 'error' && result.code === 'SCORING_LOCKED') {
+      return {status: 'locked', message: result.message || 'Scoring is locked'};
+    }
+    return {status: 'success'};
   } catch (err) {
     console.warn('[Sheets] Vocal submit error (local fallback active):', err);
+    return {status: 'error', message: String(err)};
   }
 }
 
 // ─── Ukey: Write Performance cells ONLY ─────────────────────
 
-export async function submitPerformanceToSheets(sub: PerformanceSubmission): Promise<void> {
+export async function submitPerformanceToSheets(sub: PerformanceSubmission): Promise<{status: string; message?: string}> {
   const url = getScriptUrl();
-  if (!url) return;
+  if (!url) return {status: 'error', message: 'Missing script URL'};
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
@@ -163,19 +174,30 @@ export async function submitPerformanceToSheets(sub: PerformanceSubmission): Pro
         notes:      sub.notes ?? '',
       }),
     });
+    if (!response.ok) {
+      let errMsg = `HTTP ${response.status}`;
+      try { const data = await response.json(); if (data && data.message) errMsg = data.message; } catch (_) {}
+      return {status: 'error', message: errMsg};
+    }
+    const result = await response.json();
+    if (result && result.status === 'error' && result.code === 'SCORING_LOCKED') {
+      return {status: 'locked', message: result.message || 'Scoring is locked'};
+    }
+    return {status: 'success'};
   } catch (err) {
     console.warn('[Sheets] Performance submit error (local fallback active):', err);
+    return {status: 'error', message: String(err)};
   }
 }
 
 // ─── Revan: Write Staging cells ONLY ────────────────────────
 
-export async function submitStagingToSheets(sub: StagingSubmission): Promise<void> {
+export async function submitStagingToSheets(sub: StagingSubmission): Promise<{status: string; message?: string}> {
   const url = getScriptUrl();
-  if (!url) return;
+  if (!url) return {status: 'error', message: 'Missing script URL'};
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
@@ -196,8 +218,19 @@ export async function submitStagingToSheets(sub: StagingSubmission): Promise<voi
         notes:      sub.notes ?? '',
       }),
     });
+    if (!response.ok) {
+      let errMsg = `HTTP ${response.status}`;
+      try { const data = await response.json(); if (data && data.message) errMsg = data.message; } catch (_) {}
+      return {status: 'error', message: errMsg};
+    }
+    const result = await response.json();
+    if (result && result.status === 'error' && result.code === 'SCORING_LOCKED') {
+      return {status: 'locked', message: result.message || 'Scoring is locked'};
+    }
+    return {status: 'success'};
   } catch (err) {
     console.warn('[Sheets] Staging submit error (local fallback active):', err);
+    return {status: 'error', message: String(err)};
   }
 }
 
@@ -331,6 +364,109 @@ export async function saveGlobalLockToSheets(isGlobalScoringLocked: boolean): Pr
     console.warn('[Sheets] saveGlobalLock submit error:', err);
   }
 }
+
+// ─── LOCK STATUS (Primary Source of Truth) ────────────────────
+// Per-round / per-participant / per-judge lock — synced via Google Sheets
+
+export interface LockStatusResponse {
+  status: 'success' | 'error';
+  locked: boolean;
+  round?: string;
+  participantName?: string;
+  judge?: string;
+  updatedAt?: string;
+  source?: string;
+  message?: string;
+}
+
+/**
+ * getLockStatusFromSheets
+ * Fetch lock status from Google Sheets LOCK_STATUS sheet.
+ * Uses cache:no-store + timestamp to prevent stale data.
+ * Default: locked = false if not found.
+ */
+export async function getLockStatusFromSheets(
+  round: string,
+  participantName: string,
+  judge: string
+): Promise<LockStatusResponse> {
+  const baseUrl = getScriptUrl();
+  if (!baseUrl) {
+    return { status: 'error', locked: false, message: 'Script URL belum diatur' };
+  }
+
+  // Normalize round to lowercase to match GAS normalizeText()
+  const normRound = round.trim().toLowerCase();
+
+  const url =
+    `${baseUrl}` +
+    `?action=getLockStatus` +
+    `&round=${encodeURIComponent(normRound)}` +
+    `&participantName=${encodeURIComponent(participantName)}` +
+    `&judge=${encodeURIComponent(judge)}` +
+    `&_=${Date.now()}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (!res.ok) {
+      return { status: 'error', locked: false, message: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    // Ensure locked is strictly boolean
+    const locked = data.locked === true || data.locked === 'true';
+    return { ...data, locked };
+  } catch (err) {
+    console.warn('[LockStatus] getLockStatusFromSheets error:', err);
+    return { status: 'error', locked: false, message: String(err) };
+  }
+}
+
+/**
+ * setLockStatusToSheets
+ * POST to Google Sheets LOCK_STATUS sheet (upsert row).
+ * judge must be 'Kenji', 'Ukey', or 'Revan' (display names).
+ */
+export async function setLockStatusToSheets(
+  round: string,
+  participantName: string,
+  judge: string,
+  locked: boolean
+): Promise<LockStatusResponse> {
+  const url = getScriptUrl();
+  if (!url) {
+    return { status: 'error', locked, message: 'Script URL belum diatur' };
+  }
+
+  const normRound = round.trim().toLowerCase();
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'setLockStatus',
+        round: normRound,
+        participantName,
+        judge,
+        locked,
+      }),
+    });
+    if (!res.ok) {
+      return { status: 'error', locked, message: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    const lockedResult = data.locked === true || data.locked === 'true';
+    return { ...data, locked: lockedResult };
+  } catch (err) {
+    console.warn('[LockStatus] setLockStatusToSheets error:', err);
+    return { status: 'error', locked, message: String(err) };
+  }
+}
+
 
 
 

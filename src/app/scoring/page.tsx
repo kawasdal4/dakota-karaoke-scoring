@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ChevronLeft, ChevronRight, Play, Pause, RotateCcw,
   Save, Lock, Unlock, Music, Clock, Sparkles, FileText, UserCheck, RefreshCw,
+  Wifi, WifiOff, Loader2,
 } from 'lucide-react';
 import StepperInput from '@/components/ui/stepper-input';
 import ConfirmationModal from '@/components/ui/modal';
@@ -17,7 +18,11 @@ import {
   saveDraft, getDraft,
   RemoteSubmissions,
 } from '@/lib/storage';
-import { submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets, fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets } from '@/lib/google-sheets';
+import {
+  submitVocalToSheets, submitPerformanceToSheets, submitStagingToSheets,
+  fetchParticipants, fetchSubmissionsFromSheets, toggleLockToSheets,
+  setLockStatusToSheets,
+} from '@/lib/google-sheets';
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
@@ -28,7 +33,7 @@ import {
   VocalScores, PerformanceScores, StagingScores,
   VocalSubmission, PerformanceSubmission, StagingSubmission,
 } from '@/types';
-
+import { useLockStatus } from '@/hooks/useLockStatus';
 import { getAuthSession } from '@/lib/auth';
 
 // ─── Default score states ───────────────────────────────────
@@ -65,9 +70,35 @@ export default function ScoringPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Prevents auto-poll from reverting a lock change the user just made
-  const lastLockActionRef = useRef<number>(0);
-  const LOCK_DEBOUNCE_MS = 15000;
+  // ─── LOCK STATUS via useLockStatus hook ──────────────────────
+  // LOCK_STATUS from Google Sheets is primary source of truth.
+  // isLocked state is DRIVEN by this hook; localStorage/SUBMISSIONS.isLocked
+  // are only used as a fallback during initial load before first poll completes.
+
+  const participants_computed = event?.participants ?? [];
+  const participant_computed: Participant | undefined = participants_computed[currentIndex];
+
+  const { locked: remoteLocked, syncStatus, isInitializing: lockInitializing } = useLockStatus({
+    round: event?.currentRound ?? '',
+    participantName: participant_computed?.name ?? '',
+    judge: judge === 'Admin' ? 'Kenji' : judge,
+    enabled: !isLoading && !!event && !!participant_computed,
+    onLocked: () => {
+      showToast('🔒 Penilaian dikunci oleh Admin. Draft Anda tetap tersimpan.', 'info');
+    },
+    onUnlocked: () => {
+      showToast('🔓 Penilaian dibuka oleh Admin.', 'info');
+    },
+  });
+
+  // LOCK_STATUS hook is authoritative once first poll completes.
+  // Before that, use the local state as initial placeholder.
+  useEffect(() => {
+    if (!lockInitializing) {
+      // Remote LOCK_STATUS overrides any localStorage / SUBMISSIONS.isLocked
+      setIsLocked(remoteLocked);
+    }
+  }, [remoteLocked, lockInitializing]);
 
   const fetchAndInit = async (session: JudgeRole) => {
     setIsLoading(true);
@@ -117,7 +148,6 @@ export default function ScoringPage() {
       fetchAndInit(session);
     }
   }, [router]);
-
   const participants = event?.participants ?? [];
   const participant: Participant | undefined = participants[currentIndex];
 
@@ -312,59 +342,7 @@ export default function ScoringPage() {
     }
   };
 
-  // Live storage / focus listener to pick up Admin unlock changes dynamically
-  useEffect(() => {
-    const syncLockState = () => {
-      if (!participant || !event) return;
-      const settings = getAdminSettings();
-      if (settings.isGlobalScoringLocked) {
-        setIsLocked(true);
-        return;
-      }
-
-      if (judge === 'Kenji') {
-        const subs = getVocalSubmissions(event.id, event.currentRound);
-        const existing = subs.find((s) => s.participantId === participant.id);
-        setIsLocked(existing ? existing.isLocked : false);
-      } else if (judge === 'Ukey') {
-        const subs = getPerformanceSubmissions(event.id, event.currentRound);
-        const existing = subs.find((s) => s.participantId === participant.id);
-        setIsLocked(existing ? existing.isLocked : false);
-      } else if (judge === 'Revan') {
-        const subs = getStagingSubmissions(event.id, event.currentRound);
-        const existing = subs.find((s) => s.participantId === participant.id);
-        setIsLocked(existing ? existing.isLocked : false);
-      }
-    };
-
-    const syncFromSheetsAndRefresh = async () => {
-      if (Date.now() - lastLockActionRef.current < LOCK_DEBOUNCE_MS) {
-        syncLockState();
-        return;
-      }
-      try {
-        const result = await fetchSubmissionsFromSheets();
-        if (!result || !participant || !event) { syncLockState(); return; }
-        const settings = getAdminSettings();
-        // Directly apply from API response — bypass localStorage for state update
-        applyRemoteSubmission(result, participant, settings.isGlobalScoringLocked);
-      } catch { syncLockState(); }
-    };
-
-    window.addEventListener('storage', syncLockState);
-    window.addEventListener('focus', syncFromSheetsAndRefresh);
-
-    // Auto-poll Google Sheets every 8 seconds for real-time lock/unlock changes from Admin
-    const pollId = setInterval(syncFromSheetsAndRefresh, 8000);
-
-    return () => {
-      window.removeEventListener('storage', syncLockState);
-      window.removeEventListener('focus', syncFromSheetsAndRefresh);
-      clearInterval(pollId);
-    };
-  }, [participant, event, judge]);
-
-  // Autosave draft every 5 s
+  // ─── Autosave draft every 5s (preserved even when locked) ─────
   useEffect(() => {
     if (!participant || isLocked) return;
     const id = setInterval(() => {
@@ -388,31 +366,53 @@ export default function ScoringPage() {
   const categoryMeta = judge !== 'Admin' ? JUDGE_CATEGORIES[judge] : null;
   const colorTheme = getScoreColorTheme(subtotal, maxScore);
 
-  // Admin lock toggle directly from scoring page
-  const handleAdminToggleLock = () => {
+  // Admin lock toggle from scoring page — uses setLockStatusToSheets (primary)
+  const handleAdminToggleLock = async () => {
     if (!participant || !event) return;
     const pNo = parseInt(participant.id.replace('p', '')) || 0;
     const newLockState = !isLocked;
-    // Mark timestamp so auto-poll won't override for 15s
-    lastLockActionRef.current = Date.now();
-    if (isLocked) {
-      if (judge === 'Kenji') unlockVocal(event.id, event.currentRound, participant.id);
-      else if (judge === 'Ukey') unlockPerformance(event.id, event.currentRound, participant.id);
-      else if (judge === 'Revan') unlockStaging(event.id, event.currentRound, participant.id);
-      setIsLocked(false);
-      showToast(`Kunci nilai ${judge} DIBUKA oleh Admin.`, 'info');
+    const judgeTarget = judge === 'Admin' ? 'Kenji' : judge;
+
+    setIsLocked(newLockState);
+
+    // 1. Update LOCK_STATUS in Google Sheets (primary source of truth)
+    const result = await setLockStatusToSheets(
+      event.currentRound,
+      participant.name,
+      judgeTarget,
+      newLockState
+    );
+
+    if (result.status === 'success') {
+      showToast(
+        newLockState
+          ? `🔒 Penilaian berhasil dikunci. Akun juri akan terkunci otomatis.`
+          : `🔓 Penilaian berhasil dibuka. Status sudah dikirim ke akun juri.`,
+        'info'
+      );
     } else {
+      // Revert optimistic update if API fails
+      setIsLocked(!newLockState);
+      showToast('Gagal mengubah status lock. Coba lagi.', 'error');
+      return;
+    }
+
+    // 2. Also update legacy SUBMISSIONS.isLocked for backward compat
+    if (newLockState) {
       if (judge === 'Kenji') lockVocal(event.id, event.currentRound, participant.id);
       else if (judge === 'Ukey') lockPerformance(event.id, event.currentRound, participant.id);
       else if (judge === 'Revan') lockStaging(event.id, event.currentRound, participant.id);
-      setIsLocked(true);
-      showToast(`Nilai ${judge} DITERAPKAN & TERKUNCI oleh Admin.`, 'info');
+    } else {
+      if (judge === 'Kenji') unlockVocal(event.id, event.currentRound, participant.id);
+      else if (judge === 'Ukey') unlockPerformance(event.id, event.currentRound, participant.id);
+      else if (judge === 'Revan') unlockStaging(event.id, event.currentRound, participant.id);
     }
-    // Sync lock change to Google Sheets
-    toggleLockToSheets(event.id, event.currentRound, judge, pNo, newLockState);
+
+    // 3. Keep legacy toggleLock call for backward compat with SUBMISSIONS sheet
+    toggleLockToSheets(event.id, event.currentRound, judgeTarget, pNo, newLockState);
   };
 
-  // Save handler
+  // ─── Save handler with backend lock validation ─────────────
   const executeSave = async () => {
     if (!participant || !event) return;
     setIsSubmitting(true);
@@ -436,29 +436,40 @@ export default function ScoringPage() {
       userAgent: ua,
     };
 
+    let saveResult: any;
+
     if (judge === 'Kenji') {
       const sub: VocalSubmission = { ...base, scores: vocal, subtotal: calcVocalSubtotal(vocal) };
       saveVocalSubmission(sub);
-      submitVocalToSheets(sub);
+      saveResult = await submitVocalToSheets(sub);
     } else if (judge === 'Ukey') {
       const sub: PerformanceSubmission = { ...base, scores: perf, subtotal: calcPerformanceSubtotal(perf) };
       savePerformanceSubmission(sub);
-      submitPerformanceToSheets(sub);
+      saveResult = await submitPerformanceToSheets(sub);
     } else if (judge === 'Revan') {
       const sub: StagingSubmission = { ...base, scores: staging, subtotal: calcStagingSubtotal(staging) };
       saveStagingSubmission(sub);
-      submitStagingToSheets(sub);
+      saveResult = await submitStagingToSheets(sub);
     }
 
     setIsSubmitting(false);
     setIsModalOpen(false);
+
+    // Check if backend returned locked status
+    if (saveResult && saveResult.status === 'locked') {
+      showToast('🔒 Nilai tidak disimpan karena penilaian baru saja dikunci oleh Admin.', 'error');
+      setIsLocked(true);
+      return;
+    }
+
     setIsLocked(true);
 
     showToast(
       `Nilai #${participant.no} ${participant.name} tersimpan & terkunci!`,
       'success',
       () => {
-        // Undo: unlock
+        // Undo: unlock via LOCK_STATUS (primary)
+        setLockStatusToSheets(event.currentRound, participant.name, judge === 'Admin' ? 'Kenji' : judge, false);
         if (judge === 'Kenji') unlockVocal(event.id, event.currentRound, participant.id);
         else if (judge === 'Ukey') unlockPerformance(event.id, event.currentRound, participant.id);
         else if (judge === 'Revan') unlockStaging(event.id, event.currentRound, participant.id);
@@ -554,6 +565,47 @@ export default function ScoringPage() {
         </button>
       </div>
 
+      {/* ── REAL-TIME LOCK STATUS BADGE ─────────────────────── */}
+      <div className={`w-full px-4 py-2.5 rounded-2xl border flex items-center justify-between transition-all duration-500 ${
+        syncStatus === 'checking'
+          ? 'bg-yellow-950/50 border-yellow-500/40'
+          : syncStatus === 'locked'
+          ? 'bg-rose-950/60 border-rose-500/50 shadow-rose-500/10 shadow-md'
+          : syncStatus === 'error'
+          ? 'bg-slate-900/70 border-slate-700/50'
+          : 'bg-emerald-950/50 border-emerald-500/40'
+      }`}>
+        <div className="flex items-center gap-2">
+          {syncStatus === 'checking' && (
+            <Loader2 className="w-3.5 h-3.5 text-yellow-400 animate-spin" />
+          )}
+          {syncStatus === 'locked' && (
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse inline-block" />
+          )}
+          {syncStatus === 'open' && (
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
+          )}
+          {syncStatus === 'error' && (
+            <WifiOff className="w-3.5 h-3.5 text-slate-500" />
+          )}
+          <span className={`text-xs font-extrabold ${
+            syncStatus === 'checking' ? 'text-yellow-300'
+            : syncStatus === 'locked' ? 'text-rose-300'
+            : syncStatus === 'error' ? 'text-slate-400'
+            : 'text-emerald-300'
+          }`}>
+            {syncStatus === 'checking' && 'Memeriksa status Admin...'}
+            {syncStatus === 'locked' && '🔴 PENILAIAN TERKUNCI'}
+            {syncStatus === 'open' && '🟢 PENILAIAN TERBUKA'}
+            {syncStatus === 'error' && 'Sinkronisasi Admin sedang bermasalah'}
+          </span>
+        </div>
+        <span className={`text-[10px] font-medium ${
+          syncStatus === 'error' ? 'text-slate-500' : 'text-slate-400'
+        }`}>
+          {syncStatus === 'error' ? 'Cek koneksi' : 'Status tersinkron dengan Admin'}
+        </span>
+      </div>
 
       {/* ── ADMIN ROLE SWITCHER (Only visible when logged in as Admin) ── */}
       {isAdminSession && (
