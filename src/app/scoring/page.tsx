@@ -496,7 +496,7 @@ export default function ScoringPage() {
   if (isLoading) {
     return (
       <div className="p-5 flex flex-col items-center justify-center min-h-[85vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mb-4"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mb-4" />
         <p className="text-white text-lg font-medium">Memuat data peserta...</p>
       </div>
     );
@@ -901,3 +901,4 @@ export default function ScoringPage() {
     </div>
   );
 }
+
