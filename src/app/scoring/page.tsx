@@ -10,7 +10,7 @@ import StepperInput from '@/components/ui/stepper-input';
 import ConfirmationModal from '@/components/ui/modal';
 import { useToast } from '@/components/ui/toast';
 import {
-  getStoredJudge, getActiveEvent, getAdminSettings,
+  getStoredJudge, getActiveEvent, getAdminSettings, getQualifiedParticipants,
   getVocalSubmissions, saveVocalSubmission, unlockVocal, lockVocal,
   getPerformanceSubmissions, savePerformanceSubmission, unlockPerformance, lockPerformance,
   getStagingSubmissions, saveStagingSubmission, unlockStaging, lockStaging,
@@ -78,14 +78,18 @@ export default function ScoringPage() {
       
       const evt = getActiveEvent();
       // Map to Participant interface in memory
-      evt.participants = parts.map((p) => ({
+      const mappedParts = parts.map((p) => ({
         id: `p${p.number}`,
         no: p.number,
         name: p.name,
         songTitle: 'TBA',
         category: 'Umum'
       }));
-      evt.totalParticipants = parts.length;
+
+      // Filter participants based on active round qualification (Top 10 for Semifinal, Top 5 for Final)
+      const qualifiedParts = getQualifiedParticipants(evt.id, evt.currentRound, mappedParts);
+      evt.participants = qualifiedParts;
+      evt.totalParticipants = qualifiedParts.length;
       
       setEvent(evt);
     } catch (err: any) {
@@ -94,6 +98,7 @@ export default function ScoringPage() {
       setIsLoading(false);
     }
   };
+
 
   useEffect(() => {
     const session = getAuthSession();

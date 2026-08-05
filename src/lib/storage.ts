@@ -379,6 +379,54 @@ export function buildFinalScores(eventId: string, round: string, participants: P
   });
 }
 
+// ─── Qualified Participants Per Round ────────────────────────
+
+export function getQualifiedParticipants(
+  eventId: string,
+  round: string,
+  allParticipants: Participant[]
+): Participant[] {
+  if (!allParticipants || allParticipants.length === 0) return [];
+  if (round === 'Round Penyisihan' || round === 'Penyisihan' || !round) {
+    return allParticipants;
+  }
+
+  if (round === 'Semifinal') {
+    // Top 10 participants from Round Penyisihan
+    const penyisihanScores = buildFinalScores(eventId, 'Round Penyisihan', allParticipants);
+    penyisihanScores.sort((a, b) => {
+      const sumA = (a.kenjiscore ?? 0) + (a.ukeyscore ?? 0) + (a.revanscore ?? 0);
+      const sumB = (b.kenjiscore ?? 0) + (b.ukeyscore ?? 0) + (b.revanscore ?? 0);
+      if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
+      if (sumA !== sumB) return sumB - sumA;
+      return a.participantNo - b.participantNo;
+    });
+
+    const qualifiedIds = new Set(penyisihanScores.slice(0, 10).map((s) => s.participantId));
+    const result = allParticipants.filter((p) => qualifiedIds.has(p.id));
+    return result.length > 0 ? result : allParticipants;
+  }
+
+  if (round === 'Grand Final') {
+    // Top 5 participants from Semifinal
+    const semifinalScores = buildFinalScores(eventId, 'Semifinal', allParticipants);
+    semifinalScores.sort((a, b) => {
+      const sumA = (a.kenjiscore ?? 0) + (a.ukeyscore ?? 0) + (a.revanscore ?? 0);
+      const sumB = (b.kenjiscore ?? 0) + (b.ukeyscore ?? 0) + (b.revanscore ?? 0);
+      if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
+      if (sumA !== sumB) return sumB - sumA;
+      return a.participantNo - b.participantNo;
+    });
+
+    const qualifiedIds = new Set(semifinalScores.slice(0, 5).map((s) => s.participantId));
+    const result = allParticipants.filter((p) => qualifiedIds.has(p.id));
+    return result.length > 0 ? result : allParticipants;
+  }
+
+  return allParticipants;
+}
+
+
 // ─── Drafts ──────────────────────────────────────────────────
 
 export function saveDraft(judge: JudgeRole, participantId: string, data: unknown): void {

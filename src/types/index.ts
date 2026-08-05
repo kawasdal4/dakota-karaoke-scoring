@@ -152,3 +152,66 @@ export interface AdminSettings {
   googleScriptUrl: string;
   isGlobalScoringLocked: boolean;
 }
+
+// ============================================================
+// ROUNDS & AWARDS CONSTANTS
+// ============================================================
+
+export const DEFAULT_ROUNDS = [
+  'Round Penyisihan',
+  'Semifinal',
+  'Grand Final',
+] as const;
+
+export interface AwardBadge {
+  label: string;
+  shortLabel: string;
+  badgeBg: string;
+  badgeBorder: string;
+  badgeText: string;
+  icon: string;
+}
+
+export const GRAND_FINAL_AWARDS: Record<number, AwardBadge> = {
+  1: {
+    label: 'Juara 1',
+    shortLabel: 'JUARA 1',
+    badgeBg: 'bg-amber-500/20',
+    badgeBorder: 'border-amber-400/60',
+    badgeText: 'text-amber-300',
+    icon: '🥇',
+  },
+  2: {
+    label: 'Juara 2',
+    shortLabel: 'JUARA 2',
+    badgeBg: 'bg-slate-300/20',
+    badgeBorder: 'border-slate-300/60',
+    badgeText: 'text-slate-200',
+    icon: '🥈',
+  },
+  3: {
+    label: 'Juara 3',
+    shortLabel: 'JUARA 3',
+    badgeBg: 'bg-amber-700/20',
+    badgeBorder: 'border-amber-600/60',
+    badgeText: 'text-amber-400',
+    icon: '🥉',
+  },
+  4: {
+    label: 'Harapan 1',
+    shortLabel: 'HARAPAN 1',
+    badgeBg: 'bg-emerald-500/20',
+    badgeBorder: 'border-emerald-400/60',
+    badgeText: 'text-emerald-300',
+    icon: '🏅',
+  },
+  5: {
+    label: 'Harapan 2',
+    shortLabel: 'HARAPAN 2',
+    badgeBg: 'bg-cyan-500/20',
+    badgeBorder: 'border-cyan-400/60',
+    badgeText: 'text-cyan-300',
+    icon: '🏅',
+  },
+};
+

@@ -145,6 +145,18 @@ export default function AdminPage() {
     showToast('Event aktif diubah.', 'info');
   };
 
+  const handleSwitchRound = (roundName: string) => {
+    if (!activeEvent) return;
+    const updatedEvents = events.map((e) =>
+      e.id === activeEvent.id ? { ...e, currentRound: roundName } : e
+    );
+    saveEvents(updatedEvents);
+    setActiveEvent({ ...activeEvent, currentRound: roundName });
+    setEvents(updatedEvents);
+    showToast(`Sesi babak aktif diubah ke: ${roundName}`, 'info');
+  };
+
+
   const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEventName.trim()) return;
@@ -301,17 +313,20 @@ export default function AdminPage() {
   const stagingSubs = activeEvent ? getStagingSubmissions(activeEvent.id, activeEvent.currentRound) : [];
 
   return (
-    <div className="p-4 flex flex-col gap-6 pb-24">
+    <div className="p-4 flex flex-col gap-5 pb-32">
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <Link href="/" className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-lg font-black text-white flex items-center gap-2">
-          <Settings className="w-5 h-5 text-purple-400" />
-          <span>ADMIN CONTROL</span>
-        </h1>
+        <div className="flex flex-col items-center">
+          <h1 className="text-lg font-black text-white flex items-center gap-1.5">
+            <Settings className="w-5 h-5 text-purple-400" />
+            <span>PANEL ADMIN</span>
+          </h1>
+          <span className="text-[10px] text-slate-400 font-semibold">{activeEvent?.name}</span>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleSyncSheets}
@@ -325,12 +340,12 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ── 1. MULTI-EVENT ──────────────────────────────────────── */}
+      {/* ── 1. MULTI-EVENT & ROUND CONTROL ──────────────────────── */}
       <div className="glass-panel rounded-3xl p-5 border border-purple-500/30 flex flex-col gap-4">
         <div className="flex items-center justify-between border-b border-purple-900/40 pb-2">
           <h2 className="text-sm font-extrabold text-white uppercase flex items-center gap-2">
             <Database className="w-4 h-4 text-purple-400" />
-            <span>EVENT MANAGER</span>
+            <span>EVENT & BABAK MANAGER</span>
           </h2>
           <button
             onClick={() => setIsCreatingEvent((p) => !p)}
@@ -340,6 +355,33 @@ export default function AdminPage() {
             <span>Event Baru</span>
           </button>
         </div>
+
+        {/* Current Active Round Switcher */}
+        {activeEvent && (
+          <div className="flex flex-col gap-2 p-3 rounded-2xl bg-slate-900/90 border border-purple-900/50 shadow-inner">
+            <span className="text-xs font-bold text-purple-300">Pilih Babak Aktif Penilaian:</span>
+            <div className="grid grid-cols-3 gap-1.5">
+              {['Round Penyisihan', 'Semifinal', 'Grand Final'].map((r) => (
+                <button
+                  key={r}
+                  onClick={() => handleSwitchRound(r)}
+                  className={`py-2 px-1 text-xs font-bold rounded-xl transition-all border ${
+                    activeEvent.currentRound === r
+                      ? 'bg-purple-600 border-purple-400 text-white shadow-md'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {r === 'Round Penyisihan' ? 'Penyisihan' : r}
+                </button>
+              ))}
+            </div>
+            <div className="text-[10px] text-slate-400 flex items-center justify-between mt-1 px-1">
+              <span>• Penyisihan: Semua Peserta</span>
+              <span>• Semifinal: Top 10</span>
+              <span>• Final: Top 5</span>
+            </div>
+          </div>
+        )}
 
         {isCreatingEvent && (
           <form onSubmit={handleCreateEvent} className="p-3 rounded-2xl bg-slate-900/80 border border-purple-800/40 flex flex-col gap-3">
@@ -380,7 +422,7 @@ export default function AdminPage() {
             >
               <div className="flex flex-col">
                 <span className="text-xs font-bold text-white">{evt.name}</span>
-                <span className="text-[10px] text-slate-400">{evt.totalParticipants} Peserta • {evt.currentRound}</span>
+                <span className="text-[10px] text-slate-400">{evt.totalParticipants} Peserta • Babak: {evt.currentRound}</span>
               </div>
               {activeEvent?.id === evt.id && (
                 <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full">AKTIF</span>

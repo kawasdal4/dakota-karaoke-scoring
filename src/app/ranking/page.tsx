@@ -5,8 +5,8 @@ import Link from 'next/link';
 import {
   Trophy, RefreshCw, ArrowLeft, Clock, CheckCircle2, AlertCircle,
 } from 'lucide-react';
-import { getActiveEvent, buildFinalScores, getStoredJudge } from '@/lib/storage';
-import { ParticipantFinalScore, KaraokeEvent } from '@/types';
+import { getActiveEvent, buildFinalScores, getStoredJudge, getQualifiedParticipants } from '@/lib/storage';
+import { ParticipantFinalScore, KaraokeEvent, DEFAULT_ROUNDS, GRAND_FINAL_AWARDS } from '@/types';
 import { useToast } from '@/components/ui/toast';
 import { fetchParticipants, fetchSubmissionsFromSheets } from '@/lib/google-sheets';
 import { getAuthSession } from '@/lib/auth';
@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 export default function RankingPage() {
   const { showToast } = useToast();
   const [event, setEvent] = useState<KaraokeEvent | null>(null);
+  const [activeRound, setActiveRound] = useState<string>('Round Penyisihan');
   const [rows, setRows] = useState<ParticipantFinalScore[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -22,12 +23,11 @@ export default function RankingPage() {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (targetRound?: string) => {
     setIsRefreshing(true);
     setErrorMsg(null);
     try {
       await fetchSubmissionsFromSheets().catch(() => {});
-      // Fetch live participants
       const parts = await fetchParticipants();
       
       const evt = getActiveEvent();
@@ -42,7 +42,13 @@ export default function RankingPage() {
       evt.totalParticipants = parts.length;
       
       setEvent(evt);
-      const scores = buildFinalScores(evt.id, evt.currentRound, mappedParts);
+      const currentSelectedRound = targetRound || activeRound || evt.currentRound || 'Round Penyisihan';
+      setActiveRound(currentSelectedRound);
+
+      // Get qualified participants for the selected round
+      const qualified = getQualifiedParticipants(evt.id, currentSelectedRound, mappedParts);
+
+      const scores = buildFinalScores(evt.id, currentSelectedRound, qualified);
       // Sort: complete entries by finalScore desc, then incomplete by name
       scores.sort((a, b) => {
         if (a.isComplete && b.isComplete) return (b.finalScore ?? 0) - (a.finalScore ?? 0);
@@ -65,7 +71,10 @@ export default function RankingPage() {
       router.replace('/login');
       return;
     }
-    load();
+    const evt = getActiveEvent();
+    const initRound = evt?.currentRound || 'Round Penyisihan';
+    setActiveRound(initRound);
+    load(initRound);
 
     const pollId = setInterval(() => {
       load();
@@ -73,6 +82,11 @@ export default function RankingPage() {
 
     return () => clearInterval(pollId);
   }, [router]);
+
+  const handleRoundChange = (r: string) => {
+    setActiveRound(r);
+    load(r);
+  };
 
   const handleRefresh = () => {
     load();
@@ -93,7 +107,7 @@ export default function RankingPage() {
             <Trophy className="w-5 h-5 text-amber-400" />
             <span>LIVE RANKING</span>
           </h1>
-          <span className="text-[10px] text-slate-400 font-semibold">{event?.name} • {event?.currentRound}</span>
+          <span className="text-[10px] text-slate-400 font-semibold">{event?.name}</span>
         </div>
         <button
           onClick={handleRefresh}
@@ -102,6 +116,38 @@ export default function RankingPage() {
         >
           <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
         </button>
+      </div>
+
+      {/* Round Tabs */}
+      <div className="grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-slate-900/90 border border-slate-800">
+        {DEFAULT_ROUNDS.map((r) => {
+          const isActive = activeRound === r;
+          return (
+            <button
+              key={r}
+              onClick={() => handleRoundChange(r)}
+              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+                isActive
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              {r === 'Round Penyisihan' ? 'Penyisihan' : r}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Round Qualification Banner */}
+      <div className="px-3 py-2 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center justify-between text-xs">
+        <span className="text-slate-400 font-medium">
+          {activeRound === 'Round Penyisihan' && '🔥 Babak Penyisihan (Top 10 Lolos Semifinal)'}
+          {activeRound === 'Semifinal' && '⚡ Babak Semifinal (Top 10 Peserta • Top 5 Lolos Grand Final)'}
+          {activeRound === 'Grand Final' && '👑 Babak Grand Final (Top 5 Finalis)'}
+        </span>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+          {rows.length} Peserta
+        </span>
       </div>
 
       {/* Legend */}
@@ -130,11 +176,18 @@ export default function RankingPage() {
       <div className="flex flex-col gap-2">
         {rows.map((row, idx) => {
           const rank = row.isComplete ? idx + 1 : null;
+          const award = (activeRound === 'Grand Final' && rank && GRAND_FINAL_AWARDS[rank]) ? GRAND_FINAL_AWARDS[rank] : null;
+
+          const isQualifyingSemi = activeRound === 'Round Penyisihan' && rank !== null && rank <= 10;
+          const isQualifyingFinal = activeRound === 'Semifinal' && rank !== null && rank <= 5;
+
           return (
             <div
               key={row.participantId}
               className={`grid grid-cols-[40px_1fr_52px_52px_52px_60px] gap-1 items-center px-3 py-3 rounded-2xl border transition-all ${
-                row.isComplete
+                award
+                  ? `${award.badgeBg} ${award.badgeBorder} shadow-lg`
+                  : row.isComplete
                   ? rank === 1
                     ? 'bg-amber-950/30 border-amber-400/50 shadow-[0_0_15px_rgba(251,191,36,0.15)]'
                     : 'bg-slate-900/60 border-slate-800'
@@ -143,19 +196,37 @@ export default function RankingPage() {
             >
               {/* Rank */}
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${
+                award ? `${award.badgeBg} ${award.badgeText} border ${award.badgeBorder}` :
                 rank === 1 ? 'bg-amber-400 text-slate-950' :
                 rank === 2 ? 'bg-slate-300 text-slate-950' :
                 rank === 3 ? 'bg-amber-700 text-white' :
                 'bg-slate-800 text-slate-400'
               }`}>
-                {rank ?? '—'}
+                {award ? award.icon : (rank ?? '—')}
               </div>
 
-              {/* Name */}
+              {/* Name & Qualification / Award Badge */}
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-bold text-white truncate">
-                  #{row.participantNo} {row.participantName}
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-white truncate">
+                    #{row.participantNo} {row.participantName}
+                  </span>
+                  {award && (
+                    <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-md ${award.badgeBg} ${award.badgeText} border ${award.badgeBorder}`}>
+                      {award.shortLabel}
+                    </span>
+                  )}
+                  {isQualifyingSemi && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Lolos Semi Final
+                    </span>
+                  )}
+                  {isQualifyingFinal && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Lolos Final
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] text-slate-400 truncate">{row.songTitle}</span>
               </div>
 
@@ -183,6 +254,7 @@ export default function RankingPage() {
     </div>
   );
 }
+
 
 // ─── Sub-component: Single score cell ───────────────────────
 
