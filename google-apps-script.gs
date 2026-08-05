@@ -991,44 +991,123 @@ function getAllLockStatus(e) {
 
 // ─── GET PARTICIPANT SCORES ───────────────────────────────────────
 function getParticipantScores(e) {
-  var round = e.parameter.round;
-  var participantName = e.parameter.participantName;
-  var judge = e.parameter.judge;
+  var round = e.parameter ? (e.parameter.round || '') : '';
+  var participantName = e.parameter ? (e.parameter.participantName || '') : '';
+  var judge = e.parameter ? (e.parameter.judge || '') : '';
+
   if (!round || !participantName || !judge) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Missing parameters" })).setMimeType(ContentService.MimeType.JSON);
   }
-  var data = readSubmissionsFromSheet();
-  var roleMap = { Kenji: "vocal", Ukey: "performance", Revan: "staging" };
-  var role = roleMap[judge] || judge.toLowerCase();
-  var list = data[role] || [];
-  for (var i = 0; i < list.length; i++) {
-    var sub = list[i];
-    if (String(sub.round) === round && String(sub.participantName) === participantName) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: "success",
-        round: sub.round,
-        participantName: sub.participantName,
-        judge: judge,
-        scores: sub.scores || {},
-        subtotal: sub.subtotal || 0,
-        notes: sub.notes || "",
-        isLocked: sub.isLocked === true || String(sub.isLocked).toLowerCase() === "true",
-        updatedAt: sub.updatedAt || ""
-      })).setMimeType(ContentService.MimeType.JSON);
+
+  Logger.log("[Dakota Sync Request]", { round: round, participantName: participantName, judge: judge });
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var displayJudge = normalizeJudgeName(judge);
+  var normName = normalizeText(participantName);
+  var normRound = normalizeText(round);
+
+  var resultScores = {};
+  var resultSubtotal = 0;
+  var resultNote = "";
+  var resultTotal = 0;
+
+  // 1. Try reading directly from individual participant sheet
+  var sheet = ss.getSheetByName(participantName);
+  if (!sheet) {
+    var sheets = ss.getSheets();
+    for (var s = 0; s < sheets.length; s++) {
+      if (normalizeText(sheets[s].getName()) === normName) {
+        sheet = sheets[s];
+        break;
+      }
     }
   }
-  // Not found – default empty
-  return ContentService.createTextOutput(JSON.stringify({
+
+  if (sheet) {
+    try {
+      if (displayJudge === 'Kenji') {
+        var kenjiVals = sheet.getRange("C7:C11").getValues().flat();
+        resultScores = {
+          accuracy:   toScoreNumber(kenjiVals[0]),
+          character:  toScoreNumber(kenjiVals[1]),
+          tempo:      toScoreNumber(kenjiVals[2]),
+          technique:  toScoreNumber(kenjiVals[3]),
+          expression: toScoreNumber(kenjiVals[4])
+        };
+        resultSubtotal = toScoreNumber(sheet.getRange("C12").getValue());
+        resultNote = String(sheet.getRange("A13").getDisplayValue() || sheet.getRange("A13").getValue() || "").trim();
+        resultTotal = toScoreNumber(sheet.getRange("C31").getValue());
+      } else if (displayJudge === 'Ukey') {
+        var ukeyVals = sheet.getRange("C16:C20").getValues().flat();
+        var exprVal = toScoreNumber(ukeyVals[0]);
+        resultScores = {
+          expression:     exprVal,
+          perfExpression: exprVal,
+          confidence:     toScoreNumber(ukeyVals[1]),
+          appearance:     toScoreNumber(ukeyVals[2]),
+          gesture:        toScoreNumber(ukeyVals[3]),
+          creativity:     toScoreNumber(ukeyVals[4])
+        };
+        resultSubtotal = toScoreNumber(sheet.getRange("C21").getValue());
+        resultNote = String(sheet.getRange("A22").getDisplayValue() || sheet.getRange("A22").getValue() || "").trim();
+        resultTotal = toScoreNumber(sheet.getRange("C31").getValue());
+      } else if (displayJudge === 'Revan') {
+        var revanVals = sheet.getRange("C25:C28").getValues().flat();
+        resultScores = {
+          interaction:        toScoreNumber(revanVals[0]),
+          communication:     toScoreNumber(revanVals[1]),
+          roomAtmosphere:    toScoreNumber(revanVals[2]),
+          audienceEngagement:toScoreNumber(revanVals[3])
+        };
+        resultSubtotal = toScoreNumber(sheet.getRange("C29").getValue());
+        resultNote = String(sheet.getRange("A30").getDisplayValue() || sheet.getRange("A30").getValue() || "").trim();
+        resultTotal = toScoreNumber(sheet.getRange("C31").getValue());
+      }
+    } catch (sheetErr) {
+      Logger.log("Error reading individual participant sheet: " + sheetErr);
+    }
+  }
+
+  // 2. If no non-zero score in individual sheet, fallback to SUBMISSIONS sheet
+  var hasRealScores = false;
+  for (var k in resultScores) {
+    if (resultScores[k] > 0) { hasRealScores = true; break; }
+  }
+
+  if (!hasRealScores) {
+    var data = readSubmissionsFromSheet();
+    var roleMap = { Kenji: "vocal", Ukey: "performance", Revan: "staging" };
+    var role = roleMap[displayJudge] || displayJudge.toLowerCase();
+    var list = data[role] || [];
+    for (var i = 0; i < list.length; i++) {
+      var sub = list[i];
+      if (normalizeText(sub.round) === normRound && normalizeText(sub.participantName) === normName) {
+        resultScores = sub.scores || {};
+        resultSubtotal = toScoreNumber(sub.subtotal);
+        resultNote = String(sub.notes || sub.note || "").trim();
+        break;
+      }
+    }
+  }
+
+  var lockInfo = getLockStatus(round, participantName, displayJudge);
+
+  var response = {
     status: "success",
     round: round,
     participantName: participantName,
-    judge: judge,
-    scores: {},
-    subtotal: 0,
-    notes: "",
-    isLocked: false,
-    updatedAt: ""
-  })).setMimeType(ContentService.MimeType.JSON);
+    judge: displayJudge,
+    scores: resultScores,
+    subtotal: resultSubtotal,
+    note: resultNote,
+    notes: resultNote,
+    total: resultTotal,
+    isLocked: lockInfo.locked === true,
+    updatedAt: new Date().toISOString()
+  };
+
+  Logger.log("[Dakota RAW Sync Response]", response);
+  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
 }
 
 function getOrCreateLockSheet() {

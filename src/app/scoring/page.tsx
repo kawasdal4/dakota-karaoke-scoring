@@ -27,7 +27,7 @@ import {
 import {
   VOCAL_FIELDS, PERFORMANCE_FIELDS, STAGING_FIELDS,
   calcVocalSubtotal, calcPerformanceSubtotal, calcStagingSubtotal,
-  getScoreColorTheme, detectDevice, JUDGE_CATEGORIES,
+  getScoreColorTheme, detectDevice, JUDGE_CATEGORIES, toScoreNumber,
 } from '@/lib/utils';
 import {
   JudgeRole, KaraokeEvent, Participant,
@@ -173,13 +173,12 @@ export default function ScoringPage() {
       const subs = getVocalSubmissions(ev.id, ev.currentRound);
       const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
-        // Coerce to Number to handle any type mismatch from localStorage/Sheets
         setVocal({
-          accuracy:  Number(existing.scores?.accuracy)  || 0,
-          character: Number(existing.scores?.character) || 0,
-          tempo:     Number(existing.scores?.tempo)     || 0,
-          technique: Number(existing.scores?.technique) || 0,
-          expression:Number(existing.scores?.expression)|| 0,
+          accuracy:   toScoreNumber(existing.scores?.accuracy),
+          character:  toScoreNumber(existing.scores?.character),
+          tempo:      toScoreNumber(existing.scores?.tempo),
+          technique:  toScoreNumber(existing.scores?.technique),
+          expression: toScoreNumber(existing.scores?.expression),
         });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
@@ -195,11 +194,11 @@ export default function ScoringPage() {
       const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
         setPerf({
-          expression: Number(existing.scores?.expression) || 0,
-          confidence: Number(existing.scores?.confidence) || 0,
-          appearance: Number(existing.scores?.appearance) || 0,
-          gesture:    Number(existing.scores?.gesture)    || 0,
-          creativity: Number(existing.scores?.creativity) || 0,
+          expression: toScoreNumber(existing.scores?.expression),
+          confidence: toScoreNumber(existing.scores?.confidence),
+          appearance: toScoreNumber(existing.scores?.appearance),
+          gesture:    toScoreNumber(existing.scores?.gesture),
+          creativity: toScoreNumber(existing.scores?.creativity),
         });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
@@ -215,10 +214,10 @@ export default function ScoringPage() {
       const existing = subs.find((s) => s.participantId === p.id);
       if (existing) {
         setStaging({
-          interaction:        Number(existing.scores?.interaction)        || 0,
-          communication:     Number(existing.scores?.communication)     || 0,
-          roomAtmosphere:    Number(existing.scores?.roomAtmosphere)    || 0,
-          audienceEngagement:Number(existing.scores?.audienceEngagement)|| 0,
+          interaction:        toScoreNumber(existing.scores?.interaction),
+          communication:     toScoreNumber(existing.scores?.communication),
+          roomAtmosphere:    toScoreNumber(existing.scores?.roomAtmosphere),
+          audienceEngagement:toScoreNumber(existing.scores?.audienceEngagement),
         });
         setNotes(existing.notes ?? '');
         setIsLocked(isGlobal || existing.isLocked);
@@ -243,35 +242,25 @@ export default function ScoringPage() {
   const applyRemoteSubmission = (result: RemoteSubmissions, p: typeof participant, isGlobal: boolean): boolean => {
     if (!p) return false;
 
-    // 3-tier match strategy:
-    //  1. By participantId string ('p1')
-    //  2. By participantNo number (1)
-    //  3. Last resort: first entry in list (for single-entry Sheets)
     const findMatch = (list: any[]): any => {
       const arr = list ?? [];
-      // Tier 1: exact participantId
       let m = arr.find((s: any) => String(s.participantId) === String(p!.id));
       if (m) return m;
-      // Tier 2: participantNo number equality
       m = arr.find((s: any) => Number(s.participantNo) === Number(p!.no));
       if (m) return m;
-      // Tier 3: single-entry fallback (only one submission exists → apply it)
       if (arr.length === 1) return arr[0];
       return undefined;
     };
 
     const applyScores = (m: any, setter: (v: any) => void, keys: string[]): boolean => {
       const scores: Record<string, number> = {};
-      keys.forEach(k => { scores[k] = Number(m.scores?.[k]) || 0; });
+      keys.forEach(k => { scores[k] = toScoreNumber(m.scores?.[k]); });
 
-      // Guard: only apply scores to form if at least one value is non-zero.
-      // Zero scores indicate a placeholder row (from lock operation), not real input.
       const hasRealScores = Object.values(scores).some(v => v > 0);
       if (hasRealScores) {
         setter(scores);
-        setNotes(m.notes ?? '');
+        setNotes(m.notes ?? m.note ?? '');
       }
-      // Always propagate lock state from Sheets (even from placeholder rows)
       setIsLocked(isGlobal || Boolean(m.isLocked));
       return hasRealScores;
     };
@@ -307,45 +296,77 @@ export default function ScoringPage() {
       return;
     }
     setIsSyncing(true);
+
+    console.log('[Dakota Sync Request]', {
+      round: event.currentRound,
+      participantName: participant.name,
+      judge,
+    });
+
     try {
       const result = await getParticipantScoresFromSheets(event.currentRound, participant.name, judge);
-      if (result && result.status === 'success') {
-        const { scores, notes: remoteNotes, isLocked: remoteLocked } = result;
-        if (judge === 'Kenji') {
-          setVocal({
-            accuracy: Number(scores?.accuracy) || 0,
-            character: Number(scores?.character) || 0,
-            tempo: Number(scores?.tempo) || 0,
-            technique: Number(scores?.technique) || 0,
-            expression: Number(scores?.expression) || 0,
-          });
-        } else if (judge === 'Ukey') {
-          setPerf({
-            expression: Number(scores?.expression) || 0,
-            confidence: Number(scores?.confidence) || 0,
-            appearance: Number(scores?.appearance) || 0,
-            gesture: Number(scores?.gesture) || 0,
-            creativity: Number(scores?.creativity) || 0,
-          });
-        } else if (judge === 'Revan') {
-          setStaging({
-            interaction: Number(scores?.interaction) || 0,
-            communication: Number(scores?.communication) || 0,
-            roomAtmosphere: Number(scores?.roomAtmosphere) || 0,
-            audienceEngagement: Number(scores?.audienceEngagement) || 0,
-          });
-        }
-        setNotes(remoteNotes ?? '');
-        const settings = getAdminSettings();
-        setIsLocked(settings.isGlobalScoringLocked || Boolean(remoteLocked));
-        showToast('✅ Berhasil sinkronisasi nilai dari Google Sheets!', 'success');
+
+      console.log('[Dakota RAW Sync Response]', result);
+
+      if (!result || result.status !== 'success') {
+        throw new Error(result?.message || 'Data nilai tidak berhasil diambil dari Google Sheets.');
+      }
+
+      const rawScores = result.scores;
+      console.log('[Dakota Raw Scores]', rawScores);
+
+      if (!rawScores || typeof rawScores !== 'object') {
+        throw new Error('Data nilai dari Spreadsheet tidak memiliki struktur yang valid.');
+      }
+
+      let mappedValues: any = {};
+
+      if (judge === 'Kenji') {
+        mappedValues = {
+          accuracy:   toScoreNumber(rawScores.accuracy),
+          character:  toScoreNumber(rawScores.character),
+          tempo:      toScoreNumber(rawScores.tempo),
+          technique:  toScoreNumber(rawScores.technique),
+          expression: toScoreNumber(rawScores.expression),
+        };
+        setVocal(mappedValues);
+      } else if (judge === 'Ukey') {
+        mappedValues = {
+          expression: toScoreNumber(rawScores.expression ?? rawScores.perfExpression),
+          confidence: toScoreNumber(rawScores.confidence),
+          appearance: toScoreNumber(rawScores.appearance),
+          gesture:    toScoreNumber(rawScores.gesture),
+          creativity: toScoreNumber(rawScores.creativity),
+        };
+        setPerf(mappedValues);
+      } else if (judge === 'Revan') {
+        mappedValues = {
+          interaction:        toScoreNumber(rawScores.interaction),
+          communication:     toScoreNumber(rawScores.communication),
+          roomAtmosphere:    toScoreNumber(rawScores.roomAtmosphere ?? rawScores.room_atmosphere),
+          audienceEngagement:toScoreNumber(rawScores.audienceEngagement ?? rawScores.audience_engagement),
+        };
+        setStaging(mappedValues);
+      }
+
+      console.log('[Dakota Mapped Form Values]', mappedValues);
+
+      const remoteNotes = String(result.notes ?? result.note ?? '');
+      setNotes(remoteNotes);
+
+      const settings = getAdminSettings();
+      setIsLocked(settings.isGlobalScoringLocked || Boolean(result.isLocked));
+
+      const scoresCount = Object.values(mappedValues).filter((v) => typeof v === 'number' && (v as number) > 0).length;
+
+      if (scoresCount > 0) {
+        showToast(`🟢 ${scoresCount} nilai berhasil dimuat dari Spreadsheet!`, 'success');
       } else {
-        const msg = result && result.message ? result.message : 'Gagal menjangkau Google Script.';
-        showToast(`⚠️ ${msg}`, 'error');
+        showToast('ℹ️ Belum ada nilai pada Spreadsheet untuk peserta ini.', 'info');
       }
     } catch (err: any) {
-      console.error('[Sync] Error:', err);
-      showToast('\u274c Error sinkronisasi: ' + err.message, 'error');
+      console.error('[Dakota Sync Error]', err);
+      showToast('❌ Error sinkronisasi: ' + (err.message || String(err)), 'error');
     } finally {
       setIsSyncing(false);
     }

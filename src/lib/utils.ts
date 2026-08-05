@@ -6,6 +6,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Safely parses unknown score value to a finite number.
+ * Handles null, undefined, empty strings, and comma decimals ("12,5" -> 12.5).
+ */
+export function toScoreNumber(value: unknown): number {
+  if (value === null || value === undefined || value === '') {
+    return 0;
+  }
+  const normalized = typeof value === 'string' ? value.trim().replace(',', '.') : value;
+  const numberValue = Number(normalized);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
 // ============================================================
 // JUDGE CATEGORY METADATA
 // ============================================================
