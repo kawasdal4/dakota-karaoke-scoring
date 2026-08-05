@@ -427,6 +427,41 @@ function readSubmissionsFromSheet() {
       scores = {};
     }
 
+    // If scores are empty or all zero (placeholder row from toggleLock),
+    // supplement from the scoring cells of the active sheet (best-effort)
+    var scoreValues = Object.keys(scores).map(function(k) { return Number(scores[k]); });
+    var hasRealScores = scoreValues.some(function(v) { return v > 0; });
+
+    if (!hasRealScores) {
+      try {
+        var ss2 = SpreadsheetApp.getActiveSpreadsheet();
+        var activeSheet = ss2.getActiveSheet();
+        if (role === "vocal") {
+          var vv = activeSheet.getRange("C7:C11").getValues();
+          var vAcc = Number(vv[0][0]), vChr = Number(vv[1][0]), vTmp = Number(vv[2][0]);
+          var vTec = Number(vv[3][0]), vExp = Number(vv[4][0]);
+          if (vAcc > 0 || vChr > 0 || vTmp > 0 || vTec > 0 || vExp > 0) {
+            scores = { accuracy: vAcc, character: vChr, tempo: vTmp, technique: vTec, expression: vExp };
+          }
+        } else if (role === "performance") {
+          var pv = activeSheet.getRange("C16:C20").getValues();
+          var pExp = Number(pv[0][0]), pConf = Number(pv[1][0]), pApp = Number(pv[2][0]);
+          var pGest = Number(pv[3][0]), pCre = Number(pv[4][0]);
+          if (pExp > 0 || pConf > 0 || pApp > 0 || pGest > 0 || pCre > 0) {
+            scores = { expression: pExp, confidence: pConf, appearance: pApp, gesture: pGest, creativity: pCre };
+          }
+        } else if (role === "staging") {
+          var sv = activeSheet.getRange("C25:C28").getValues();
+          var sInt = Number(sv[0][0]), sComm = Number(sv[1][0]), sRoom = Number(sv[2][0]), sAud = Number(sv[3][0]);
+          if (sInt > 0 || sComm > 0 || sRoom > 0 || sAud > 0) {
+            scores = { interaction: sInt, communication: sComm, roomAtmosphere: sRoom, audienceEngagement: sAud };
+          }
+        }
+      } catch(suppErr) {
+        Logger.log("supplement scores error (non-fatal): " + suppErr.toString());
+      }
+    }
+
     var baseSub = {
       id: "sub-" + role + "-" + participantNo,
       eventId: eventId,

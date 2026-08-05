@@ -224,12 +224,20 @@ export default function ScoringPage() {
       return undefined;
     };
 
-    const applyScores = (m: any, setter: (v: any) => void, keys: string[]) => {
+    const applyScores = (m: any, setter: (v: any) => void, keys: string[]): boolean => {
       const scores: Record<string, number> = {};
       keys.forEach(k => { scores[k] = Number(m.scores?.[k]) || 0; });
-      setter(scores);
-      setNotes(m.notes ?? '');
+
+      // Guard: only apply scores to form if at least one value is non-zero.
+      // Zero scores indicate a placeholder row (from lock operation), not real input.
+      const hasRealScores = Object.values(scores).some(v => v > 0);
+      if (hasRealScores) {
+        setter(scores);
+        setNotes(m.notes ?? '');
+      }
+      // Always propagate lock state from Sheets (even from placeholder rows)
       setIsLocked(isGlobal || Boolean(m.isLocked));
+      return hasRealScores;
     };
 
     if (judge === 'Kenji') {
