@@ -162,7 +162,7 @@ export default function ScoringPage() {
   const formatTimer = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-
+  const refreshCurrentScores = (overrideParticipant?: Participant, overrideEvent?: KaraokeEvent | null) => {
     const p = overrideParticipant ?? participant;
     const ev = overrideEvent ?? event;
     if (!p || !ev) return;
@@ -496,7 +496,7 @@ export default function ScoringPage() {
   if (isLoading) {
     return (
       <div className="p-5 flex flex-col items-center justify-center min-h-[85vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mb-4" />
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mb-4"></div>
         <p className="text-white text-lg font-medium">Memuat data peserta...</p>
       </div>
     );
@@ -733,6 +733,108 @@ export default function ScoringPage() {
             {isAdminSession && (
               <button
                 onClick={handleAdminToggleLock}
+                className="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black flex items-center gap-1 hover:bg-rose-500 transition-all"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Admin Kunci</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── SUBTOTAL DISPLAY ─────────────────────────────────── */}
+      <div className={`glass-panel rounded-2xl p-4 border flex items-center justify-between ${colorTheme.borderColor}`}>
+        <div className="flex flex-col">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SUBTOTAL</span>
+          <span className="text-[10px] text-slate-500">{colorTheme.label}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-4xl font-black ${colorTheme.textColor}`}>{subtotal}</span>
+          <span className="text-xs font-semibold text-slate-400">/ {maxScore}</span>
+        </div>
+      </div>
+
+      {/* ── KENJI — VOCAL SCORES ─────────────────────────────── */}
+      {judge === 'Kenji' && (
+        <div className="glass-panel rounded-3xl p-4 border border-purple-500/30 flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-purple-900/40 pb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.8)]" />
+              <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">VOCAL</h3>
+            </div>
+            <span className="text-xs font-bold text-purple-300 bg-purple-950/80 border border-purple-800/40 px-2.5 py-0.5 rounded-full">
+              Maks 50 Poin
+            </span>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {VOCAL_FIELDS.map(({ key, label, max }) => (
+              <StepperInput
+                key={key}
+                label={label}
+                max={max}
+                value={vocal[key]}
+                onChange={(val) => setVocal((prev) => ({ ...prev, [key]: val }))}
+                disabled={isLocked && !isAdminSession}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── UKEY — PERFORMANCE SCORES ────────────────────────── */}
+      {judge === 'Ukey' && (
+        <div className="glass-panel rounded-3xl p-4 border border-blue-500/30 flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-blue-900/40 pb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.8)]" />
+              <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">PERFORMANCE</h3>
+            </div>
+            <span className="text-xs font-bold text-blue-300 bg-blue-950/80 border border-blue-800/40 px-2.5 py-0.5 rounded-full">
+              Maks 30 Poin
+            </span>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {PERFORMANCE_FIELDS.map(({ key, label, max }) => (
+              <StepperInput
+                key={key}
+                label={label}
+                max={max}
+                value={perf[key]}
+                onChange={(val) => setPerf((prev) => ({ ...prev, [key]: val }))}
+                disabled={isLocked && !isAdminSession}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── REVAN — STAGING SCORES ───────────────────────────── */}
+      {judge === 'Revan' && (
+        <div className="glass-panel rounded-3xl p-4 border border-cyan-500/30 flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-cyan-900/40 pb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-cyan-500 shadow-[0_0_10px_rgba(6,182,212,0.8)]" />
+              <h3 className="text-sm font-extrabold text-white uppercase tracking-wider">STAGING</h3>
+            </div>
+            <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 border border-cyan-800/40 px-2.5 py-0.5 rounded-full">
+              Maks 20 Poin
+            </span>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {STAGING_FIELDS.map(({ key, label, max }) => (
+              <StepperInput
+                key={key}
+                label={label}
+                max={max}
+                value={staging[key]}
+                onChange={(val) => setStaging((prev) => ({ ...prev, [key]: val }))}
+                disabled={isLocked && !isAdminSession}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Optional Notes */}
       <div className="flex flex-col gap-1.5 p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
@@ -789,7 +891,7 @@ export default function ScoringPage() {
       <ConfirmationModal
         isOpen={isModalOpen}
         title="Simpan & Kunci Nilai?"
-        message={"Simpan skor " + subtotal + "/" + maxScore + " (" + judge + ") untuk #" + participant.no + " " + participant.name + "? Nilai akan tersimpan ke database & Google Sheets."}
+        message={`Simpan skor ${subtotal}/${maxScore} (${judge}) untuk #${participant.no} ${participant.name}? Nilai akan tersimpan ke database & Google Sheets.`}
         confirmText="Simpan & Lanjut"
         cancelText="Periksa Lagi"
         onConfirm={executeSave}
